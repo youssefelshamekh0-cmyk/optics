@@ -62,4 +62,3 @@ MVP عربي RTL لإدارة الفروع وحسابات فريق البيع، 
 - `npm run build` يبني التطبيق.
 - `npx supabase db advisors --help` يعرض خيارات مراجعة قاعدة البيانات.
 - لا تُسجّل أسرار Supabase في Git أو في متغير يبدأ بـ`NEXT_PUBLIC_` باستثناء publishable key.
-

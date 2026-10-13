@@ -1,0 +1,63 @@
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+type Relationship = { foreignKeyName: string; columns: string[]; isOneToOne: boolean; referencedRelation: string; referencedColumns: string[] };
+type Table<Row, Insert, Update = Partial<Insert>, Relationships extends Relationship[] = Relationship[]> = { Row: Row; Insert: Insert; Update: Update; Relationships: Relationships };
+type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "active" | "inactive"; created_at: string; updated_at: string };
+type Profile = { id: string; email: string | null; phone: string | null; full_name: string; status: "active" | "disabled"; created_at: string; updated_at: string };
+type Customer = { id: string; full_name: string; phone: string | null; email: string | null; notes: string | null; created_by: string | null; created_at: string; updated_at: string };
+type Sale = { id: string; invoice_number: number; branch_id: string; customer_id: string; created_by: string | null; total_amount: number; discount_amount: number; grand_total: number; prescription: Json; notes: string | null; delivery_status: "pending" | "processing" | "ready" | "delivered" | "cancelled"; created_at: string; updated_at: string };
+type SaleItem = { id: string; sale_id: string; item_name: string; quantity: number; unit_price: number; line_total: number };
+type SalePayment = { id: string; sale_id: string; amount: number; payment_method: "cash" | "card" | "instapay" | "other"; notes: string | null; received_by: string | null; created_at: string };
+type Product = { id: string; sku: string | null; name: string; category: "frame" | "lens" | "accessory" | "other"; brand: string | null; model: string | null; color: string | null; size: string | null; active: boolean; created_by: string | null; created_at: string; updated_at: string };
+type BranchProduct = { id: string; branch_id: string; product_id: string; cost_price: number; reference_price: number; quantity: number; updated_at: string };
+type StockMovement = { id: string; branch_id: string; product_id: string; quantity_delta: number; movement_type: "opening" | "purchase" | "adjustment" | "sale" | "return" | "transfer_in" | "transfer_out"; reference_id: string | null; reason: string | null; created_by: string | null; created_at: string };
+type LensCompany = { id: string; name: string; active: boolean; created_at: string };
+type LensType = { id: string; company_id: string; name: string; category: string; specifications: Json; active: boolean; created_at: string };
+type BranchLensPrice = { id: string; branch_id: string; lens_type_id: string; sphere_min: number; sphere_max: number; cylinder_min: number | null; cylinder_max: number | null; options: string; cost_price: number; reference_price: number; active: boolean; created_at: string };
+type Supplier = { id: string; name: string; phone: string | null; address: string | null; notes: string | null; active: boolean; created_at: string };
+type LensSupply = { id: string; invoice_number: string; supplier_id: string; branch_id: string; received_at: string; total_cost: number; status: "received"; created_by: string | null; created_at: string };
+type LensSupplyItem = { id: string; supply_id: string; product_id: string; quantity: number; unit_cost: number; line_total: number };
+
+export type Database = {
+  public: {
+    Tables: {
+      branches: Table<Branch, { id?: string; code: string; name: string; address?: string | null; phone?: string | null; status?: "active" | "inactive"; created_at?: string; updated_at?: string }, { code?: string; name?: string; address?: string | null; phone?: string | null; status?: "active" | "inactive"; updated_at?: string } , [{ foreignKeyName: "user_branch_access_branch_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_branch_access"; referencedColumns: ["branch_id"] }] >;
+      customers: Table<Customer, { id?: string; full_name: string; phone?: string | null; email?: string | null; notes?: string | null; created_by?: string | null; created_at?: string; updated_at?: string }, Partial<Customer>, []>;
+      sales: Table<Sale, { id?: string; invoice_number?: number; branch_id: string; customer_id: string; created_by?: string | null; total_amount: number; discount_amount?: number; prescription?: Json; notes?: string | null; delivery_status?: Sale["delivery_status"]; created_at?: string; updated_at?: string }, Partial<Sale>, [{ foreignKeyName: "sales_branch_id_fkey"; columns: ["branch_id"]; isOneToOne: false; referencedRelation: "branches"; referencedColumns: ["id"] }, { foreignKeyName: "sales_customer_id_fkey"; columns: ["customer_id"]; isOneToOne: false; referencedRelation: "customers"; referencedColumns: ["id"] }, { foreignKeyName: "sales_created_by_fkey"; columns: ["created_by"]; isOneToOne: false; referencedRelation: "user_profiles"; referencedColumns: ["id"] }] >;
+      sale_items: Table<SaleItem, { id?: string; sale_id: string; item_name: string; quantity: number; unit_price: number; line_total?: number }, Partial<SaleItem>, [{ foreignKeyName: "sale_items_sale_id_fkey"; columns: ["sale_id"]; isOneToOne: false; referencedRelation: "sales"; referencedColumns: ["id"] }] >;
+      sale_payments: Table<SalePayment, { id?: string; sale_id: string; amount: number; payment_method: SalePayment["payment_method"]; notes?: string | null; received_by?: string | null; created_at?: string }, Partial<SalePayment>, [{ foreignKeyName: "sale_payments_sale_id_fkey"; columns: ["sale_id"]; isOneToOne: false; referencedRelation: "sales"; referencedColumns: ["id"] }] >;
+      products: Table<Product, { id?: string; sku?: string | null; name: string; category: Product["category"]; brand?: string | null; model?: string | null; color?: string | null; size?: string | null; active?: boolean; created_by?: string | null; created_at?: string; updated_at?: string }, Partial<Product>, []>;
+      branch_products: Table<BranchProduct, { id?: string; branch_id: string; product_id: string; cost_price?: number; reference_price?: number; quantity?: number; updated_at?: string }, Partial<BranchProduct>, []>;
+      stock_movements: Table<StockMovement, { id?: string; branch_id: string; product_id: string; quantity_delta: number; movement_type: StockMovement["movement_type"]; reference_id?: string | null; reason?: string | null; created_by?: string | null; created_at?: string }, Partial<StockMovement>, []>;
+      lens_companies: Table<LensCompany, { id?: string; name: string; active?: boolean; created_at?: string }, Partial<LensCompany>, []>;
+      lens_types: Table<LensType, { id?: string; company_id: string; name: string; category?: string; specifications?: Json; active?: boolean; created_at?: string }, Partial<LensType>, []>;
+      branch_lens_prices: Table<BranchLensPrice, { id?: string; branch_id: string; lens_type_id: string; sphere_min: number; sphere_max: number; cylinder_min?: number | null; cylinder_max?: number | null; options?: string; cost_price?: number; reference_price: number; active?: boolean; created_at?: string }, Partial<BranchLensPrice>, []>;
+      suppliers: Table<Supplier, { id?: string; name: string; phone?: string | null; address?: string | null; notes?: string | null; active?: boolean; created_at?: string }, Partial<Supplier>, []>;
+      lens_supplies: Table<LensSupply, { id?: string; invoice_number: string; supplier_id: string; branch_id: string; received_at?: string; total_cost: number; status?: "received"; created_by?: string | null; created_at?: string }, Partial<LensSupply>, []>;
+      lens_supply_items: Table<LensSupplyItem, { id?: string; supply_id: string; product_id: string; quantity: number; unit_cost: number; line_total?: number }, Partial<LensSupplyItem>, []>;
+      user_profiles: Table<Profile, Profile, Partial<Profile>, [
+        { foreignKeyName: "user_roles_user_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_roles"; referencedColumns: ["user_id"] },
+        { foreignKeyName: "user_permissions_user_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_permissions"; referencedColumns: ["user_id"] },
+        { foreignKeyName: "user_branch_access_user_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_branch_access"; referencedColumns: ["user_id"] }
+      ]>;
+      roles: Table<{ id: string; key: string; name: string }, { id?: string; key: string; name: string }, Partial<{ key: string; name: string }>, [{ foreignKeyName: "user_roles_role_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_roles"; referencedColumns: ["role_id"] }] >;
+      permissions: Table<{ id: string; key: string; description: string }, { id?: string; key: string; description: string }, Partial<{ key: string; description: string }>, [{ foreignKeyName: "user_permissions_permission_id_fkey"; columns: ["id"]; isOneToOne: false; referencedRelation: "user_permissions"; referencedColumns: ["permission_id"] }] >;
+      user_roles: Table<{ user_id: string; role_id: string }, { user_id: string; role_id: string }, Partial<{ user_id: string; role_id: string }>, [{ foreignKeyName: "user_roles_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "user_profiles"; referencedColumns: ["id"] }, { foreignKeyName: "user_roles_role_id_fkey"; columns: ["role_id"]; isOneToOne: false; referencedRelation: "roles"; referencedColumns: ["id"] }] >;
+      role_permissions: Table<{ role_id: string; permission_id: string }, { role_id: string; permission_id: string }, Partial<{ role_id: string; permission_id: string }>, []>;
+      user_permissions: Table<{ user_id: string; permission_id: string }, { user_id: string; permission_id: string }, Partial<{ user_id: string; permission_id: string }>, [{ foreignKeyName: "user_permissions_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "user_profiles"; referencedColumns: ["id"] }, { foreignKeyName: "user_permissions_permission_id_fkey"; columns: ["permission_id"]; isOneToOne: false; referencedRelation: "permissions"; referencedColumns: ["id"] }] >;
+      user_branch_access: Table<{ user_id: string; branch_id: string }, { user_id: string; branch_id: string }, Partial<{ user_id: string; branch_id: string }>, [{ foreignKeyName: "user_branch_access_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "user_profiles"; referencedColumns: ["id"] }, { foreignKeyName: "user_branch_access_branch_id_fkey"; columns: ["branch_id"]; isOneToOne: false; referencedRelation: "branches"; referencedColumns: ["id"] }] >;
+      audit_logs: Table<{ id: string; actor_id: string | null; action: string; entity_type: string; entity_id: string | null; details: Json | null; created_at: string }, { id?: string; actor_id?: string | null; action: string; entity_type: string; entity_id?: string | null; details?: Json | null; created_at?: string }>;
+    };
+    Views: Record<string, never>;
+    Functions: {
+      admin_create_user_profile: { Args: { p_user_id: string; p_email: string; p_full_name: string; p_role_key: string; p_branch_ids?: string[]; p_permission_keys?: string[] }; Returns: undefined };
+      admin_create_phone_profile: { Args: { p_user_id: string; p_phone: string; p_full_name: string; p_role_key: string; p_branch_ids?: string[]; p_permission_keys?: string[] }; Returns: undefined };
+      admin_update_salesperson: { Args: { p_user_id: string; p_full_name: string; p_status: string; p_branch_ids: string[]; p_permission_keys: string[] }; Returns: undefined };
+      create_optics_sale: { Args: { p_branch_id: string; p_customer_id: string; p_created_by: string; p_discount: number; p_items: Json; p_prescription: Json; p_initial_payment: number; p_payment_method: string; p_notes: string }; Returns: { sale_id: string; invoice_number: number }[] };
+      record_sale_payment: { Args: { p_sale_id: string; p_amount: number; p_payment_method: string; p_received_by: string; p_notes: string }; Returns: string };
+      create_optics_product: { Args: { p_sku: string; p_name: string; p_category: string; p_brand: string; p_model: string; p_color: string; p_size: string; p_branch_id: string; p_quantity: number; p_cost_price: number; p_reference_price: number; p_created_by: string }; Returns: string };
+      receive_lens_supply: { Args: { p_invoice_number: string; p_supplier_name: string; p_supplier_phone: string; p_branch_id: string; p_received_at: string; p_items: Json; p_created_by: string }; Returns: string };
+    };
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
+  };
+};
