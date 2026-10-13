@@ -2,7 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
-export async function POST() {
+export async function POST(request: Request) {
   if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
   const user = await getCurrentUser();
   const supabase = await createSupabaseServerClient();
