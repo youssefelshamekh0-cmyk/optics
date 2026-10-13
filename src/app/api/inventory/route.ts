@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit";
 
 const productSchema = z.object({
   branchId: z.string().uuid(), sku: z.string().trim().max(80).default(""),
-  name: z.string().trim().min(2).max(160), category: z.enum(["frame", "lens", "accessory", "other"]),
+  name: z.string().trim().min(2).max(160), category: z.enum(["frame", "lens", "accessory", "other", "sunglasses", "contact_lens", "sports_glasses"]),
   brand: z.string().trim().max(100).default(""), model: z.string().trim().max(100).default(""),
   color: z.string().trim().max(60).default(""), size: z.string().trim().max(60).default(""),
   quantity: z.number().int().min(0).max(100000), costPrice: z.number().finite().min(0), referencePrice: z.number().finite().min(0),
@@ -40,7 +40,11 @@ export async function POST(request: Request) {
   const parsed = productSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "راجع بيانات الصنف والفرع والأسعار" }, { status: 400 });
   const input = parsed.data;
-  const { data, error } = await getSupabaseAdmin().rpc("create_optics_product", {
+  const admin = getSupabaseAdmin();
+  const { data: branch, error: branchError } = await admin.from("branches").select("id").eq("id", input.branchId).eq("status", "active").maybeSingle();
+  if (branchError) throw branchError;
+  if (!branch) return Response.json({ error: "الفرع غير موجود أو متوقف" }, { status: 400 });
+  const { data, error } = await admin.rpc("create_optics_product", {
     p_sku: input.sku, p_name: input.name, p_category: input.category, p_brand: input.brand, p_model: input.model,
     p_color: input.color, p_size: input.size, p_branch_id: input.branchId, p_quantity: input.quantity,
     p_cost_price: input.costPrice, p_reference_price: input.referencePrice, p_created_by: user!.id,

@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
-const schema = z.object({ name: z.string().trim().min(2).max(160), status: z.enum(["ACTIVE", "DISABLED"]), branchIds: z.array(z.string().uuid()).min(1), permissionKeys: z.array(z.string().max(80)), password: z.string().min(12).max(200).optional() });
+const schema = z.object({ name: z.string().trim().min(2).max(160), status: z.enum(["ACTIVE", "DISABLED"]), branchIds: z.array(z.string().uuid()).min(1), permissionKeys: z.array(z.string().max(80)), baseSalary:z.number().min(0).max(10000000).optional(),commissionRate:z.number().min(0).max(100).optional(), password: z.string().min(12).max(200).optional() });
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const { user, response } = await requirePermission("users.manage");
@@ -16,12 +16,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!parsed.success) return Response.json({ error: "راجع بيانات المستخدم" }, { status: 400 });
   const input = parsed.data;
   if (new Set(input.branchIds).size !== input.branchIds.length || new Set(input.permissionKeys).size !== input.permissionKeys.length) return Response.json({ error: "توجد اختيارات مكررة" }, { status: 400 });
-  const admin = getSupabaseAdmin();
+  const admin = getSupabaseAdmin() as any;
   const permissions = [...new Set([...input.permissionKeys, "branches.read"])];
   const { error } = await admin.rpc("admin_update_salesperson", { p_user_id: id, p_full_name: input.name, p_status: input.status.toLowerCase(), p_branch_ids: input.branchIds, p_permission_keys: permissions });
   if (error) {
     if (error.message.includes("salesperson not found")) return Response.json({ error: "البائع غير موجود" }, { status: 404 });
     return Response.json({ error: "راجع الفروع والصلاحيات المختارة" }, { status: 400 });
+  }
+  if(input.baseSalary!==undefined||input.commissionRate!==undefined){
+    const {data:currentEmployee,error:employeeLookupError}=await admin.from("employees").select("branch_id,base_salary,commission_rate").eq("user_id",id).maybeSingle();if(employeeLookupError)throw employeeLookupError;
+    const branchId=input.branchIds.includes(currentEmployee?.branch_id)?currentEmployee.branch_id:input.branchIds[0];
+    const {error:employeeError}=await admin.from("employees").upsert({user_id:id,branch_id:branchId,full_name:input.name,job_title:"بائع",status:input.status==="ACTIVE"?"active":"inactive",base_salary:input.baseSalary??currentEmployee?.base_salary??0,commission_rate:input.commissionRate??currentEmployee?.commission_rate??0},{onConflict:"user_id"});if(employeeError)throw employeeError;
   }
   if (input.password) {
     const { error: passwordError } = await admin.auth.admin.updateUserById(id, { password: input.password });

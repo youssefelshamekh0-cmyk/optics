@@ -50,7 +50,15 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "راجع بيانات المورد والفاتورة والأصناف المستلمة" }, { status: 400 });
   const input = parsed.data;
-  const { data, error } = await getSupabaseAdmin().rpc("receive_lens_supply", {
+  const admin = getSupabaseAdmin();
+  const [branch, productRows] = await Promise.all([
+    admin.from("branches").select("id").eq("id", input.branchId).eq("status", "active").maybeSingle(),
+    admin.from("products").select("id,category,active").in("id", [...new Set(input.items.map((item) => item.productId))]),
+  ]);
+  if (branch.error || productRows.error) throw branch.error ?? productRows.error;
+  if (!branch.data) return Response.json({ error: "الفرع غير موجود أو متوقف" }, { status: 400 });
+  if (productRows.data?.length !== new Set(input.items.map((item) => item.productId)).size || productRows.data.some((p) => !p.active || !["lens", "contact_lens"].includes(p.category))) return Response.json({ error: "التوريد يقبل العدسات الطبية واللاصقة النشطة فقط" }, { status: 400 });
+  const { data, error } = await admin.rpc("receive_lens_supply", {
     p_invoice_number: input.invoiceNumber, p_supplier_name: input.supplierName, p_supplier_phone: input.supplierPhone,
     p_branch_id: input.branchId, p_received_at: input.receivedAt,
     p_items: input.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost })),

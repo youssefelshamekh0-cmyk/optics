@@ -8,4 +8,3 @@ export async function POST(request: Request) {
   await audit(user.id, "auth.login", "user", user.id);
   return Response.json({ ok: true, user });
 }
-

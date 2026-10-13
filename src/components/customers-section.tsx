@@ -60,7 +60,7 @@ export default function CustomersSection({ canManage }: { canManage: boolean }) 
   function beginEdit(customer: Customer) {
     setEditingId(customer.id);
     setDraft({ name: customer.full_name, phone: customer.phone ?? "", email: customer.email ?? "", notes: customer.notes ?? "" });
-    setNotice(""); setError("");
+    setNotice(""); setError(""); setPhoneLookup("");
     document.getElementById("customer-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
@@ -91,7 +91,7 @@ export default function CustomersSection({ canManage }: { canManage: boolean }) 
         {visibleCustomers.length === 0 && <tr><td colSpan={canManage ? 5 : 4} className="table-empty">{search ? "لا توجد نتائج مطابقة للبحث." : "لا يوجد عملاء في هذا الفرع بعد."}</td></tr>}
       </tbody></table></div>
       {canManage && <form id="customer-form" className="customer-form" onSubmit={saveCustomer}>
-        <div className="section-heading"><div><p className="eyebrow">{editingId ? "تعديل السجل" : "تسجيل جديد"}</p><h3>{editingId ? "تعديل بيانات العميل" : "إضافة عميل"}</h3></div>{editingId && <button type="button" className="quiet" onClick={() => { setEditingId(null); setDraft(emptyDraft); }}>إلغاء التعديل</button>}</div>
+        <div className="section-heading"><div><p className="eyebrow">{editingId ? "تعديل السجل" : "تسجيل جديد"}</p><h3>{editingId ? "تعديل بيانات العميل" : "إضافة عميل"}</h3></div>{editingId && <button type="button" className="quiet" onClick={() => { setEditingId(null); setDraft(emptyDraft); setPhoneLookup(""); }}>إلغاء التعديل</button>}</div>
         <div className="customer-fields">
           <label>اسم العميل<input required minLength={2} maxLength={160} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
           <label>رقم الموبايل<input type="tel" inputMode="tel" maxLength={40} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} />{phoneLookup && <small className="field-hint">{phoneLookup}</small>}</label>
