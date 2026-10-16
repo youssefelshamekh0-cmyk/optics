@@ -152,6 +152,7 @@ export async function POST(request: Request) {
     p_initial_payment: initialPayment, p_payment_method: input.paymentMethod, p_notes: input.notes,
   });
   if (error?.message.includes("insufficient product stock")) return Response.json({ error: "الكمية المطلوبة غير متاحة في مخزون الفرع" }, { status: 409 });
+  if (error?.message.includes("seller shift required")) return Response.json({ error: "افتح وردية أولاً من تبويب نظرة عامة قبل تسجيل الفواتير" }, { status: 409 });
   if (error) return Response.json({ error: "تعذر إنشاء الفاتورة. راجع المبالغ والبنود." }, { status: 400 });
   const created = Array.isArray(data) ? data[0] : null;
   if (!created) throw new Error("لم ترجع قاعدة البيانات رقم الفاتورة");
