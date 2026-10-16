@@ -5,7 +5,7 @@ import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "
 type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
 type Customer = { id: string; full_name: string; phone: string | null; email: string | null };
 type SaleItemDraft = { name: string; quantity: number; productId: string; itemKind: "product" | "service" };
-type CatalogProduct = { id: string; name: string; category: string; sku: string | null; stock: { quantity: number; reference_price: number; cost_price: number } };
+type CatalogProduct = { id: string; name: string; category: string; sku: string | null; stock: { quantity: number; reference_price: number } };
 type LensType = { id: string; name: string; category: string; company: string };
 type LensSelection = { lensTypeId: string; options: string; rightSphere: string; rightCylinder: string; rightAxis: string; leftSphere: string; leftCylinder: string; leftAxis: string; add: string; pupilDistance: string };
 type LensQuote = { lensTypeId: string; lensTypeName: string; company: string; right: { priceId: string; referencePrice: number }; left: { priceId: string; referencePrice: number }; pairReferencePrice: number };

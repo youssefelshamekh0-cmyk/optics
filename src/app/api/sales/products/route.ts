@@ -10,9 +10,9 @@ export async function GET(request: Request) {
   const admin = getSupabaseAdmin();
   const [products, stock] = await Promise.all([
     admin.from("products").select("id,sku,name,category,brand,model,color,size").eq("active", true).order("name"),
-    admin.from("branch_products").select("product_id,quantity,reference_price,cost_price").eq("branch_id", branchId),
+    admin.from("branch_products").select("product_id,quantity,reference_price").eq("branch_id", branchId),
   ]);
   if (products.error || stock.error) throw products.error ?? stock.error;
   const stockByProduct = new Map((stock.data ?? []).map((row) => [row.product_id, row]));
-  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stockByProduct.get(product.id) ?? { quantity: 0, reference_price: 0, cost_price: 0 } })) });
+  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stockByProduct.get(product.id) ?? { quantity: 0, reference_price: 0 } })) });
 }

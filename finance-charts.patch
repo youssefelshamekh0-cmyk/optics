@@ -1,0 +1,130 @@
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 3e23a8f..6723552 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -9,3 +9,4 @@
+ @media(max-width:520px){.ops-fields,.ops-account-grid{grid-template-columns:1fr}.ops-inline-pay{flex-wrap:wrap}.ops-branch select{width:100%}}
+ @media(max-width:760px){.ops-forms{grid-template-columns:1fr}.ops-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-account-grid{grid-template-columns:1fr 1fr}.ops-toolbar{align-items:stretch;flex-direction:column}}
+ @media(max-width:520px){.ops-fields,.ops-account-grid{grid-template-columns:1fr}.ops-inline-pay{flex-wrap:wrap}.ops-branch select{width:100%}}
++.fin-panel h3{font-size:12px;margin:14px 0 8px;color:var(--green-deep)}.fin-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:8px}.fin-kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:4px;background:#fcfdfc}.fin-kpi span{font-size:10px;color:var(--muted)}.fin-kpi strong{font-size:16px;color:var(--green-deep)}.fin-kpi.good strong{color:#2f7a52}.fin-kpi.bad strong{color:var(--red)}.fin-grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:20px}.fin-svg{width:100%;height:auto;direction:ltr}.fin-grid{stroke:#e7ece8;stroke-width:1}.fin-axis{font-size:9px;fill:#8c9892}.fin-bar-a{fill:var(--green)}.fin-bar-b{fill:var(--gold)}.fin-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:10px;color:var(--muted);margin-bottom:6px}.fin-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-left:5px}.fin-legend i.a{background:var(--green)}.fin-legend i.b{background:var(--gold)}.fin-hbars{display:grid;gap:9px}.fin-hrow{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:8px;font-size:11px}.fin-hlabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#53605c}.fin-htrack{height:9px;background:var(--mint);border-radius:6px;overflow:hidden}.fin-hfill{height:100%;background:var(--green);border-radius:6px}.fin-hfill.neg{background:var(--red)}.fin-sub{margin-top:20px!important}@media(max-width:800px){.fin-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.fin-grid-2{grid-template-columns:1fr}}
+diff --git a/src/components/finance-charts.tsx b/src/components/finance-charts.tsx
+new file mode 100644
+index 0000000..10c2ba1
+--- /dev/null
++++ b/src/components/finance-charts.tsx
+@@ -0,0 +1,95 @@
++"use client";
++import { useEffect, useState } from "react";
++
++type Point = { key: string; label: string; revenue?: number; expenses?: number; purchases?: number; payroll?: number; sales?: number };
++type Dash = {
++  role: "owner" | "seller";
++  metrics: Record<string, number>;
++  series: Point[];
++  byBranch?: { id: string; name: string; sales: number; orders: number }[];
++  accounts?: { id: string; name: string; balance: number; branch_id: string }[];
++};
++
++const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 0 }).format(n);
++const compact = (n: number) => new Intl.NumberFormat("ar-EG", { notation: "compact", maximumFractionDigits: 1 }).format(n);
++
++function Kpi({ label, value, tone }: { label: string; value: number; tone?: "good" | "bad" }) {
++  return <article className={`fin-kpi ${tone ?? ""}`}><span>{label}</span><strong>{money(value)}</strong></article>;
++}
++
++function MonthlyBars({ data }: { data: { label: string; a: number; b: number }[]; }) {
++  const W = 560, H = 220, padL = 44, padB = 28, padT = 10;
++  const max = Math.max(1, ...data.flatMap((d) => [d.a, d.b]));
++  const innerH = H - padB - padT, step = (W - padL) / data.length, bw = Math.min(26, step / 3);
++  const y = (v: number) => padT + innerH - (v / max) * innerH;
++  return (
++    <svg viewBox={`0 0 ${W} ${H}`} className="fin-svg" role="img" aria-label="الإيرادات مقابل المصروفات لآخر 6 شهور">
++      {[0, 0.5, 1].map((t) => <g key={t}><line x1={padL} x2={W} y1={y(max * t)} y2={y(max * t)} className="fin-grid" /><text x={padL - 6} y={y(max * t) + 3} textAnchor="end" className="fin-axis">{compact(max * t)}</text></g>)}
++      {data.map((d, i) => {
++        const cx = padL + step * i + step / 2;
++        return <g key={d.label + i}>
++          <rect x={cx - bw - 1} y={y(d.a)} width={bw} height={Math.max(0, padT + innerH - y(d.a))} rx="3" className="fin-bar-a"><title>{`${d.label} — إيرادات: ${money(d.a)}`}</title></rect>
++          <rect x={cx + 1} y={y(d.b)} width={bw} height={Math.max(0, padT + innerH - y(d.b))} rx="3" className="fin-bar-b"><title>{`${d.label} — مصروفات: ${money(d.b)}`}</title></rect>
++          <text x={cx} y={H - 8} textAnchor="middle" className="fin-axis">{d.label}</text>
++        </g>;
++      })}
++    </svg>
++  );
++}
++
++function HBars({ rows, empty }: { rows: { label: string; value: number }[]; empty: string }) {
++  const max = Math.max(1, ...rows.map((r) => Math.abs(r.value)));
++  if (!rows.length) return <p className="footnote">{empty}</p>;
++  return <div className="fin-hbars">{rows.map((r) => <div className="fin-hrow" key={r.label}><span className="fin-hlabel">{r.label}</span><div className="fin-htrack"><div className={`fin-hfill ${r.value < 0 ? "neg" : ""}`} style={{ width: `${(Math.abs(r.value) / max) * 100}%` }} /></div><strong>{money(r.value)}</strong></div>)}</div>;
++}
++
++export default function FinanceCharts() {
++  const [d, setD] = useState<Dash | null>(null);
++  const [err, setErr] = useState("");
++  useEffect(() => {
++    let live = true;
++    fetch("/api/dashboard", { cache: "no-store" })
++      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? "تعذر تحميل الماليات"); if (live) setD(j); })
++      .catch((e) => live && setErr(e instanceof Error ? e.message : "تعذر تحميل الماليات"));
++    return () => { live = false; };
++  }, []);
++
++  if (err) return <section className="panel"><p className="notice error">{err}</p></section>;
++  if (!d) return <section className="panel"><p className="footnote">جارٍ تحميل الماليات…</p></section>;
++
++  if (d.role === "seller") {
++    return <section className="panel fin-panel">
++      <div className="section-heading"><div><p className="eyebrow">أداؤك</p><h2>مبيعاتك لآخر 6 شهور</h2></div></div>
++      <div className="fin-kpis"><Kpi label="مبيعات الشهر" value={d.metrics.sales ?? 0} /><Kpi label="عمولة الشهر" value={d.metrics.commission ?? 0} tone="good" /></div>
++      <HBars rows={d.series.map((s) => ({ label: s.label, value: s.sales ?? 0 }))} empty="لا توجد مبيعات." />
++    </section>;
++  }
++
++  const m = d.metrics;
++  const bars = d.series.map((s) => ({ label: s.label, a: s.revenue ?? 0, b: (s.purchases ?? 0) + (s.expenses ?? 0) + (s.payroll ?? 0) }));
++  const net = (m.sales ?? 0) - (m.purchases ?? 0) - (m.expenses ?? 0);
++  return (
++    <section className="panel fin-panel">
++      <div className="section-heading"><div><p className="eyebrow">الماليات</p><h2>ملخص الشهر الحالي</h2></div></div>
++      <div className="fin-kpis">
++        <Kpi label="المبيعات" value={m.sales ?? 0} />
++        <Kpi label="المشتريات" value={m.purchases ?? 0} />
++        <Kpi label="المصروفات" value={m.expenses ?? 0} />
++        <Kpi label="صافي تقريبي (مبيعات − مشتريات − مصروفات)" value={net} tone={net >= 0 ? "good" : "bad"} />
++        <Kpi label="رصيد الخزن" value={m.cash ?? 0} />
++        <Kpi label="مستحق من العملاء" value={m.due ?? 0} />
++        <Kpi label="مستحق للموردين" value={m.supplierDue ?? 0} />
++        <Kpi label="رواتب معلّقة" value={m.pendingPayroll ?? 0} />
++      </div>
++      <div className="fin-grid-2">
++        <div><h3>الإيرادات مقابل المصروفات (6 شهور)</h3>
++          <div className="fin-legend"><span><i className="a" />إيرادات</span><span><i className="b" />مشتريات + مصروفات + رواتب</span></div>
++          <MonthlyBars data={bars} /></div>
++        <div><h3>مبيعات الفروع هذا الشهر</h3>
++          <HBars rows={(d.byBranch ?? []).map((b) => ({ label: b.name, value: b.sales })).sort((x, y) => y.value - x.value)} empty="لا توجد مبيعات هذا الشهر." />
++          <h3 className="fin-sub">أرصدة الخزن</h3>
++          <HBars rows={(d.accounts ?? []).map((a) => ({ label: a.name, value: a.balance })).sort((x, y) => y.value - x.value)} empty="لا توجد خزن." /></div>
++      </div>
++    </section>
++  );
++}
+diff --git a/src/components/workspace.tsx b/src/components/workspace.tsx
+index 2d35948..7ab8305 100644
+--- a/src/components/workspace.tsx
++++ b/src/components/workspace.tsx
+@@ -6,6 +6,7 @@ import CustomersSection from "@/components/customers-section";
+ import SalesSection from "@/components/sales-section";
+ import { LensPricesSection, LensSuppliesSection, ProductsSection } from "@/components/catalog-sections";
+ import OperationsSection from "@/components/operations-section";
++import FinanceCharts from "@/components/finance-charts";
+ 
+ type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
+ type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
+@@ -123,6 +124,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     {activeTab === "overview" && <>
+     <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "الفروع المتاحة لك تظهر هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
+     <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={isOwner ? String(staff.length).padStart(2, "0") : "—"} detail={isOwner ? "حسابات المستخدمين" : "حسب صلاحيتك"}/></section>
++    <FinanceCharts />
+     <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
+       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
+     </section></>}

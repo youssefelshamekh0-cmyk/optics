@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 
 type Shift = { id: string; branch_id: string; cash_account_id: string; opening_cash: number; closing_cash?: number | null; status: "open" | "closed"; opened_at: string; closed_at?: string | null; branches?: { name: string } | null; cash_accounts?: { name: string } | null };
 type Account = { id: string; branch_id: string; name: string };
-type ShiftData = { owner: boolean; shifts: Shift[]; accounts: Account[] };
+type Deposit = { id: string; amount: number; description: string | null; created_at: string };
+type ShiftData = { owner: boolean; shifts: Shift[]; accounts: Account[]; deposits: Deposit[] };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const clock = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`; };
@@ -17,7 +18,7 @@ async function loadShifts(): Promise<ShiftData> {
   const r = await fetch("/api/shifts", { cache: "no-store" });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error ?? "تعذر تحميل الوردية");
-  return { owner: Boolean(j.owner), shifts: j.shifts ?? [], accounts: j.accounts ?? [] };
+  return { owner: Boolean(j.owner), shifts: j.shifts ?? [], accounts: j.accounts ?? [], deposits: j.deposits ?? [] };
 }
 
 function useNow(active: boolean) {
@@ -42,6 +43,8 @@ export default function ShiftPanel() {
   const [accountId, setAccountId] = useState("");
   const [openingCash, setOpeningCash] = useState("0");
   const [closingCash, setClosingCash] = useState("");
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositNotes, setDepositNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -61,7 +64,7 @@ export default function ShiftPanel() {
       const r = await fetch("/api/shifts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تنفيذ العملية");
-      setMessage(done); setClosingCash(""); await load(); window.dispatchEvent(new Event("shift-changed"));
+      setMessage(done); setClosingCash(""); setDepositAmount(""); setDepositNotes(""); await load(); window.dispatchEvent(new Event("shift-changed"));
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تنفيذ العملية"); } finally { setBusy(false); }
   }
 
@@ -80,6 +83,12 @@ export default function ShiftPanel() {
       {open ? (
         <div className="shift-running">
           <div className="shift-timer" aria-live="off"><span>الوقت المنقضي</span><strong>{clock(now - new Date(open.opened_at).getTime())}</strong><small>بدأت {day(open.opened_at)} الساعة {time(open.opened_at)} — {open.branches?.name ?? "الفرع"} · {open.cash_accounts?.name ?? "الخزنة"}</small></div>
+          <form className="shift-form" onSubmit={(e) => { e.preventDefault(); void send({ action: "deposit", shiftId: open.id, amount: Number(depositAmount), notes: depositNotes }, "تم تسجيل التوريد للخزنة المركزية وخصمه من درج الوردية"); }}>
+            <p className="footnote">توريد كاش للخزنة المركزية: يُخصم من درج الوردية ويظهر للمالك فورًا. اعدّ الكاش المتبقي فقط عند الإغلاق.</p>
+            <label>مبلغ التوريد<input required type="number" min="0.01" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} /></label>
+            <label>ملاحظة (اختياري)<input maxLength={200} value={depositNotes} onChange={(e) => setDepositNotes(e.target.value)} /></label>
+            <button className="primary" disabled={busy || depositAmount === "" || Number(depositAmount) <= 0}>توريد للخزنة المركزية</button>
+          </form>
           <form className="shift-form" onSubmit={(e) => { e.preventDefault(); void send({ action: "close", shiftId: open.id, closingCash: Number(closingCash), notes: "" }, `تم إغلاق الوردية وتسجيل ${hoursLabel(now - new Date(open.opened_at).getTime())} عمل`); }}>
             <p className="footnote">كاش البداية {money(Number(open.opening_cash))}</p>
             <label>العد الفعلي للكاش عند الإغلاق<input required type="number" min="0" step="0.01" value={closingCash} onChange={(e) => setClosingCash(e.target.value)} /></label>
@@ -96,6 +105,12 @@ export default function ShiftPanel() {
           <button className="primary" disabled={busy || !account}>بدء اليومية</button>
         </form>
       )}
+      {data.deposits.length > 0 && <>
+        <h3 className="ops-subtitle">توريداتي للخزنة المركزية</h3>
+        <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الوقت</th><th>المبلغ</th><th>البيان</th></tr></thead><tbody>
+          {data.deposits.slice(0, 10).map((d) => <tr key={d.id}><td>{day(d.created_at)}</td><td>{time(d.created_at)}</td><td><strong>{money(Number(d.amount))}</strong></td><td>{d.description ?? "—"}</td></tr>)}
+        </tbody></table></div>
+      </>}
       {history.length > 0 && <>
         <h3 className="ops-subtitle">سجل ساعات العمل</h3>
         <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الفرع</th><th>من</th><th>إلى</th><th>المدة</th><th>العد عند الإغلاق</th></tr></thead><tbody>

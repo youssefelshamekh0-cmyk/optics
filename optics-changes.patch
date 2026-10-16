@@ -1,0 +1,705 @@
+diff --git a/src/app/api/lens-prices/route.ts b/src/app/api/lens-prices/route.ts
+index 2c97545..b18280a 100644
+--- a/src/app/api/lens-prices/route.ts
++++ b/src/app/api/lens-prices/route.ts
+@@ -3,15 +3,23 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
+ import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
+ import { audit } from "@/lib/audit";
+ 
++const typeRow = z.object({
++  name: z.string().trim().min(2).max(120),
++  costPrice: z.number().finite().min(0).max(10_000_000),
++  referencePrice: z.number().finite().min(0).max(10_000_000),
++});
++// One company, one measurement range/options, several lens types — each type with its own price.
+ const schema = z.object({
+-  branchId: z.string().uuid(), company: z.string().trim().min(2).max(120), type: z.string().trim().min(2).max(120),
++  branchId: z.string().uuid(), company: z.string().trim().min(2).max(120),
+   category: z.string().trim().min(2).max(80).default("طبي"),
+   sphereMin: z.number().finite().min(-30).max(30), sphereMax: z.number().finite().min(-30).max(30),
+   cylinderMin: z.union([z.number().finite().min(-20).max(20), z.null()]).default(null),
+   cylinderMax: z.union([z.number().finite().min(-20).max(20), z.null()]).default(null),
+-  options: z.string().trim().max(300).default(""), costPrice: z.number().finite().min(0), referencePrice: z.number().finite().min(0),
++  options: z.string().trim().max(300).default(""),
++  types: z.array(typeRow).min(1).max(30),
+ }).refine((v) => v.sphereMin <= v.sphereMax, { message: "نطاق SPH غير صحيح" })
+-  .refine((v) => (v.cylinderMin === null && v.cylinderMax === null) || (v.cylinderMin !== null && v.cylinderMax !== null && v.cylinderMin <= v.cylinderMax), { message: "نطاق CYL غير صحيح" });
++  .refine((v) => (v.cylinderMin === null && v.cylinderMax === null) || (v.cylinderMin !== null && v.cylinderMax !== null && v.cylinderMin <= v.cylinderMax), { message: "نطاق CYL غير صحيح" })
++  .refine((v) => new Set(v.types.map((t) => t.name.toLowerCase())).size === v.types.length, { message: "نوع العدسة مكرر" });
+ 
+ async function ownerOnly() {
+   const user = await getCurrentUser();
+@@ -41,20 +49,26 @@ export async function POST(request: Request) {
+   if (response) return response;
+   if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
+   const parsed = schema.safeParse(await request.json().catch(() => null));
+-  if (!parsed.success) return Response.json({ error: "راجع بيانات الشركة والنوع ونطاق المقاس والسعر" }, { status: 400 });
++  if (!parsed.success) return Response.json({ error: "راجع بيانات الشركة والأنواع ونطاق المقاس والأسعار" }, { status: 400 });
+   const input = parsed.data;
+   const admin = getSupabaseAdmin();
+   const { data: company, error: companyError } = await admin.from("lens_companies").upsert({ name: input.company }, { onConflict: "name" }).select("id").single();
+   if (companyError) throw companyError;
+-  const { data: lensType, error: typeError } = await admin.from("lens_types").upsert({ company_id: company.id, name: input.type, category: input.category }, { onConflict: "company_id,name" }).select("id").single();
++  const { data: lensTypes, error: typeError } = await admin.from("lens_types")
++    .upsert(input.types.map((t) => ({ company_id: company.id, name: t.name, category: input.category })), { onConflict: "company_id,name" })
++    .select("id,name");
+   if (typeError) throw typeError;
+-  const { data, error } = await admin.from("branch_lens_prices").insert({
+-    branch_id: input.branchId, lens_type_id: lensType.id, sphere_min: input.sphereMin, sphere_max: input.sphereMax,
++  const typeIdByName = new Map((lensTypes ?? []).map((row) => [row.name.toLowerCase(), row.id]));
++  const rows = input.types.map((t) => ({
++    branch_id: input.branchId, lens_type_id: typeIdByName.get(t.name.toLowerCase())!, sphere_min: input.sphereMin, sphere_max: input.sphereMax,
+     cylinder_min: input.cylinderMin, cylinder_max: input.cylinderMax, options: input.options,
+-    cost_price: input.costPrice, reference_price: input.referencePrice,
+-  }).select("id").single();
+-  if (error?.code === "P0001") return Response.json({ error: "النطاق يتعارض مع سعر مسجل لنفس الشركة والنوع" }, { status: 409 });
++    cost_price: t.costPrice, reference_price: t.referencePrice,
++  }));
++  if (rows.some((row) => !row.lens_type_id)) throw new Error("تعذر ربط أنواع العدسات");
++  // A single INSERT statement is atomic: if any type overlaps an existing range, none of them is saved.
++  const { data, error } = await admin.from("branch_lens_prices").insert(rows).select("id");
++  if (error?.code === "P0001") return Response.json({ error: "أحد الأنواع يتعارض نطاقه مع سعر مسجل لنفس الشركة والنوع" }, { status: 409 });
+   if (error) throw error;
+-  await audit(user!.id, "lens_price.create", "lens_price", data.id, { branchId: input.branchId });
+-  return Response.json({ priceId: data.id }, { status: 201 });
++  await audit(user!.id, "lens_price.create", "lens_price", data?.[0]?.id, { branchId: input.branchId, company: input.company, types: input.types.length });
++  return Response.json({ created: data?.length ?? 0 }, { status: 201 });
+ }
+diff --git a/src/app/api/lens-supplies/route.ts b/src/app/api/lens-supplies/route.ts
+index aa1e5ab..d875767 100644
+--- a/src/app/api/lens-supplies/route.ts
++++ b/src/app/api/lens-supplies/route.ts
+@@ -35,12 +35,20 @@ export async function GET(request: Request) {
+   // otherwise the receiving form can never be shown for the first supply.
+   const products = await admin.from("products").select("id,name,sku,category,brand,model").in("category", ["lens", "contact_lens"]).eq("active", true).order("name");
+   if (products.error) throw products.error;
+-  if (!branchId) return Response.json({ supplies: [], products: products.data ?? [] });
++  // Lens types registered in the price list (the ones sale invoices use), grouped by company in the UI.
++  const [lensTypeRows, lensCompanyRows] = await Promise.all([
++    admin.from("lens_types").select("id,company_id,name,category").eq("active", true).order("name"),
++    admin.from("lens_companies").select("id,name").eq("active", true).order("name"),
++  ]);
++  if (lensTypeRows.error || lensCompanyRows.error) throw lensTypeRows.error ?? lensCompanyRows.error;
++  const companyName = new Map((lensCompanyRows.data ?? []).map((row) => [row.id, row.name]));
++  const lensTypes = (lensTypeRows.data ?? []).flatMap((row) => companyName.has(row.company_id) ? [{ id: row.id, name: row.name, category: row.category, company: companyName.get(row.company_id)! }] : []);
++  if (!branchId) return Response.json({ supplies: [], products: products.data ?? [], lensTypes });
+   const { data: supplies, error } = await admin.from("lens_supplies")
+     .select("id,invoice_number,supplier_id,branch_id,received_at,total_cost,status,created_at")
+     .eq("branch_id", branchId).order("received_at", { ascending: false }).limit(100);
+   if (error) throw error;
+-  if (!supplies?.length) return Response.json({ supplies: [], products: products.data ?? [] });
++  if (!supplies?.length) return Response.json({ supplies: [], products: products.data ?? [], lensTypes });
+   const [supplierRows, itemRows] = await Promise.all([
+     admin.from("suppliers").select("id,name,phone").in("id", [...new Set(supplies.map((row) => row.supplier_id))]),
+     admin.from("lens_supply_items").select("id,supply_id,product_id,quantity,unit_cost,line_total").in("supply_id", supplies.map((row) => row.id)),
+@@ -53,6 +61,7 @@ export async function GET(request: Request) {
+   return Response.json({
+     supplies: supplies.map((supply) => ({ ...supply, supplier: supplierMap.get(supply.supplier_id) ?? null, items: (itemsBySupply.get(supply.id) ?? []).map((item) => ({ ...item, product: productMap.get(item.product_id) ?? null })) })),
+     products: products.data ?? [],
++    lensTypes,
+   });
+ }
+ 
+diff --git a/src/app/api/operations/route.ts b/src/app/api/operations/route.ts
+index dde3fde..28fdac6 100644
+--- a/src/app/api/operations/route.ts
++++ b/src/app/api/operations/route.ts
+@@ -36,6 +36,17 @@ export async function GET(request: Request) {
+   const branchId = new URL(request.url).searchParams.get("branchId");
+   if (branchId && !branchAllowed(user!,branchId)) return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+   const admin=getSupabaseAdmin() as any;
++  if(module==="central") {
++    if(!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
++    const account=await admin.from("cash_accounts").select("id,name").eq("is_central",true).maybeSingle();if(account.error)throw account.error;
++    if(!account.data)return Response.json({central:null});
++    const [balance,rows]=await Promise.all([admin.rpc("cash_account_balance",{p_account:account.data.id}),admin.from("cash_transactions").select("id,direction,amount,description,created_by,created_at").eq("cash_account_id",account.data.id).eq("transaction_type","central_deposit").order("created_at",{ascending:false}).limit(200)]);
++    if(balance.error||rows.error)throw balance.error??rows.error;
++    const actorIds=[...new Set((rows.data??[]).map((x:any)=>x.created_by).filter(Boolean))];
++    const profiles=actorIds.length?await admin.from("user_profiles").select("id,full_name").in("id",actorIds):{data:[],error:null};if(profiles.error)throw profiles.error;
++    const names=new Map((profiles.data??[]).map((x:any)=>[x.id,x.full_name]));
++    return Response.json({central:{id:account.data.id,name:account.data.name,balance:Number(balance.data??0),deposits:(rows.data??[]).map((x:any)=>({id:x.id,amount:Number(x.amount),description:x.description,created_at:x.created_at,seller:names.get(x.created_by)??"—"}))}});
++  }
+   if(module==="inventory") {
+     let stock=admin.from("branch_products").select("branch_id,product_id,quantity,cost_price,reference_price,products(name,sku,category)").order("updated_at",{ascending:false}).limit(300);
+     let moves=admin.from("stock_movements").select("id,branch_id,product_id,quantity_delta,movement_type,reason,created_at,products(name,sku),branches(name)").order("created_at",{ascending:false}).limit(100);
+diff --git a/src/app/api/sales/products/route.ts b/src/app/api/sales/products/route.ts
+index 89c43e5..06717b5 100644
+--- a/src/app/api/sales/products/route.ts
++++ b/src/app/api/sales/products/route.ts
+@@ -10,9 +10,9 @@ export async function GET(request: Request) {
+   const admin = getSupabaseAdmin();
+   const [products, stock] = await Promise.all([
+     admin.from("products").select("id,sku,name,category,brand,model,color,size").eq("active", true).order("name"),
+-    admin.from("branch_products").select("product_id,quantity,reference_price,cost_price").eq("branch_id", branchId),
++    admin.from("branch_products").select("product_id,quantity,reference_price").eq("branch_id", branchId),
+   ]);
+   if (products.error || stock.error) throw products.error ?? stock.error;
+   const stockByProduct = new Map((stock.data ?? []).map((row) => [row.product_id, row]));
+-  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stockByProduct.get(product.id) ?? { quantity: 0, reference_price: 0, cost_price: 0 } })) });
++  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stockByProduct.get(product.id) ?? { quantity: 0, reference_price: 0 } })) });
+ }
+diff --git a/src/app/api/shifts/route.ts b/src/app/api/shifts/route.ts
+index e8e1685..4d2cad7 100644
+--- a/src/app/api/shifts/route.ts
++++ b/src/app/api/shifts/route.ts
+@@ -1,26 +1,81 @@
+-import {z} from "zod";
+-import {getSupabaseAdmin} from "@/lib/supabase/admin";
+-import {getCurrentUser,requirePermission,requireSameOrigin} from "@/lib/auth";
+-import {audit} from "@/lib/audit";
+-const openSchema=z.object({action:z.literal("open"),branchId:z.string().uuid(),cashAccountId:z.string().uuid(),openingCash:z.number().min(0).max(10000000)});
+-const closeSchema=z.object({action:z.literal("close"),shiftId:z.string().uuid(),closingCash:z.number().min(0).max(10000000),notes:z.string().max(500).default("")});
+-export async function GET(){
+- const user=await getCurrentUser();if(!user)return Response.json({error:"يلزم تسجيل الدخول"},{status:401});const admin=getSupabaseAdmin() as any;
+- if(user.roles.includes("super_admin")){const {data,error}=await admin.from("seller_shifts").select("id,user_id,branch_id,cash_account_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,closing_notes,user_profiles(full_name,phone),branches(name,code),cash_accounts(name)").order("opened_at",{ascending:false}).limit(200);if(error)throw error;return Response.json({owner:true,shifts:data??[]});}
+- const {data:shift,error}=await admin.from("seller_shifts").select("id,branch_id,cash_account_id,opening_cash,closing_cash,status,opened_at,closed_at,branches(name,code),cash_accounts(name)").eq("user_id",user.id).order("opened_at",{ascending:false}).limit(20);if(error)throw error;
+- const {data:accounts,error:accountError}=await admin.from("cash_accounts").select("id,branch_id,name,payment_method").in("branch_id",user.branchIds).eq("payment_method","cash").eq("active",true);if(accountError)throw accountError;
+- return Response.json({owner:false,shifts:shift??[],accounts:accounts??[]});
++import { z } from "zod";
++import { getSupabaseAdmin } from "@/lib/supabase/admin";
++import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
++import { audit } from "@/lib/audit";
++
++const openSchema = z.object({ action: z.literal("open"), branchId: z.string().uuid(), cashAccountId: z.string().uuid(), openingCash: z.number().min(0).max(10000000) });
++const closeSchema = z.object({ action: z.literal("close"), shiftId: z.string().uuid(), closingCash: z.number().min(0).max(10000000), notes: z.string().max(500).default("") });
++const depositSchema = z.object({ action: z.literal("deposit"), shiftId: z.string().uuid(), amount: z.number().positive().max(10000000), notes: z.string().trim().max(200).default("") });
++// Range bounds are ISO instants built by the browser from the owner's local dates (Egypt DST safe).
++const isoInstant = z.string().datetime({ offset: true });
++
++export async function GET(request: Request) {
++  const user = await getCurrentUser();
++  if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
++  const admin = getSupabaseAdmin() as any;
++
++  if (user.roles.includes("super_admin")) {
++    // Owner view: every seller's shifts, optionally narrowed by date range and branch, for the working-hours report.
++    const params = new URL(request.url).searchParams;
++    const from = isoInstant.safeParse(params.get("from") ?? "");
++    const to = isoInstant.safeParse(params.get("to") ?? "");
++    const branchId = z.string().uuid().safeParse(params.get("branchId") ?? "");
++    let query = admin.from("seller_shifts")
++      .select("id,user_id,branch_id,cash_account_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,closing_notes,user_profiles(full_name,phone),branches(name,code),cash_accounts(name)")
++      .order("opened_at", { ascending: false }).limit(2000);
++    if (from.success) query = query.gte("opened_at", from.data);
++    if (to.success) query = query.lte("opened_at", to.data);
++    if (branchId.success) query = query.eq("branch_id", branchId.data);
++    const { data, error } = await query;
++    if (error) throw error;
++    return Response.json({ owner: true, shifts: data ?? [] });
++  }
++
++  const { data: shift, error } = await admin.from("seller_shifts")
++    .select("id,branch_id,cash_account_id,opening_cash,closing_cash,status,opened_at,closed_at,branches(name,code),cash_accounts(name)")
++    .eq("user_id", user.id).order("opened_at", { ascending: false }).limit(20);
++  if (error) throw error;
++  const { data: accounts, error: accountError } = await admin.from("cash_accounts")
++    .select("id,branch_id,name,payment_method").in("branch_id", user.branchIds).eq("payment_method", "cash").eq("active", true);
++  if (accountError) throw accountError;
++  // The seller's own central-box deposits (drawer side of the ledger).
++  const { data: deposits, error: depositError } = await admin.from("cash_transactions")
++    .select("id,amount,description,created_at")
++    .eq("created_by", user.id).eq("transaction_type", "central_deposit").eq("direction", "out")
++    .order("created_at", { ascending: false }).limit(20);
++  if (depositError) throw depositError;
++  return Response.json({ owner: false, shifts: shift ?? [], accounts: accounts ?? [], deposits: deposits ?? [] });
+ }
+-export async function POST(request:Request){
+- const user=await getCurrentUser();if(!user)return Response.json({error:"يلزم تسجيل الدخول"},{status:401});if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
+- if(user.roles.includes("super_admin"))return Response.json({error:"الوردية مطلوبة لحسابات البائعين فقط"},{status:400});
+- const parsed=z.discriminatedUnion("action",[openSchema,closeSchema]).safeParse(await request.json().catch(()=>null));if(!parsed.success)return Response.json({error:"راجع بيانات الوردية"},{status:400});const admin=getSupabaseAdmin() as any;
+- if(parsed.data.action==="open"){
+-   const {data,error}=await admin.rpc("open_seller_shift",{p_user:user.id,p_branch:parsed.data.branchId,p_cash_account:parsed.data.cashAccountId,p_opening_cash:parsed.data.openingCash});if(error)return Response.json({error:error.message.includes("duplicate")?"لديك وردية مفتوحة بالفعل":"تعذر فتح الوردية؛ تأكد من الفرع والخزنة"},{status:400});
+-   await audit(user.id,"shift.open","seller_shift",data,{branchId:parsed.data.branchId});return Response.json({success:true,shiftId:data});
+- }
+- const {data,error}=await admin.rpc("close_seller_shift",{p_shift:parsed.data.shiftId,p_user:user.id,p_count:parsed.data.closingCash,p_notes:parsed.data.notes});if(error)return Response.json({error:"تعذر إغلاق الوردية؛ تحقق من أنها مفتوحة"},{status:400});
+- await audit(user.id,"shift.close","seller_shift",parsed.data.shiftId,{});
+- // Deliberately discard expected cash and variance: those are owner-only reconciliation data.
+- return Response.json({success:true,message:"تم إغلاق الوردية وتسجيل العد"});
++
++export async function POST(request: Request) {
++  const user = await getCurrentUser();
++  if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
++  if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
++  if (user.roles.includes("super_admin")) return Response.json({ error: "الوردية مطلوبة لحسابات البائعين فقط" }, { status: 400 });
++  const parsed = z.discriminatedUnion("action", [openSchema, closeSchema, depositSchema]).safeParse(await request.json().catch(() => null));
++  if (!parsed.success) return Response.json({ error: "راجع بيانات الوردية" }, { status: 400 });
++  const admin = getSupabaseAdmin() as any;
++
++  if (parsed.data.action === "open") {
++    const { data, error } = await admin.rpc("open_seller_shift", { p_user: user.id, p_branch: parsed.data.branchId, p_cash_account: parsed.data.cashAccountId, p_opening_cash: parsed.data.openingCash });
++    if (error) return Response.json({ error: error.message.includes("duplicate") ? "لديك وردية مفتوحة بالفعل" : "تعذر فتح الوردية؛ تأكد من الفرع والخزنة" }, { status: 400 });
++    await audit(user.id, "shift.open", "seller_shift", data, { branchId: parsed.data.branchId });
++    return Response.json({ success: true, shiftId: data });
++  }
++
++  if (parsed.data.action === "deposit") {
++    const amount = Math.round(parsed.data.amount * 100) / 100;
++    const { data, error } = await admin.rpc("deposit_to_central", { p_shift: parsed.data.shiftId, p_user: user.id, p_amount: amount, p_notes: parsed.data.notes });
++    // Deliberately generic: do not reveal the drawer's expected balance to the seller.
++    if (error) return Response.json({ error: "تعذر تسجيل التوريد؛ راجع المبلغ وتأكد أن الوردية مفتوحة" }, { status: 400 });
++    await audit(user.id, "shift.central_deposit", "cash_deposit", data, { shiftId: parsed.data.shiftId, amount });
++    return Response.json({ success: true, message: "تم تسجيل التوريد للخزنة المركزية" });
++  }
++
++  const { data, error } = await admin.rpc("close_seller_shift", { p_shift: parsed.data.shiftId, p_user: user.id, p_count: parsed.data.closingCash, p_notes: parsed.data.notes });
++  if (error) return Response.json({ error: "تعذر إغلاق الوردية؛ تحقق من أنها مفتوحة" }, { status: 400 });
++  void data;
++  await audit(user.id, "shift.close", "seller_shift", parsed.data.shiftId, {});
++  // Deliberately discard expected cash and variance: those are owner-only reconciliation data.
++  return Response.json({ success: true, message: "تم إغلاق الوردية وتسجيل العد" });
+ }
+diff --git a/src/components/catalog-sections.tsx b/src/components/catalog-sections.tsx
+index 85f6483..d335001 100644
+--- a/src/components/catalog-sections.tsx
++++ b/src/components/catalog-sections.tsx
+@@ -46,37 +46,69 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
+ }
+ 
+ type Price = { id: string; sphere_min: number; sphere_max: number; cylinder_min: number | null; cylinder_max: number | null; options: string; cost_price: number; reference_price: number; lens: { name: string; category: string; company: string } | null };
++type TypeRow = { key: number; name: string; costPrice: string; referencePrice: string };
++const emptyTypeRow = (key: number): TypeRow => ({ key, name: "", costPrice: "0", referencePrice: "0" });
+ export function LensPricesSection({ branches }: { branches: Branch[] }) {
+   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
+   const [branchId, setBranchId] = useState(""); const [prices, setPrices] = useState<Price[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+-  const [form, setForm] = useState({ company: "", type: "", category: "طبي", sphereMin: "-6", sphereMax: "6", cylinderMin: "", cylinderMax: "", options: "", costPrice: "0", referencePrice: "0" });
++  const [form, setForm] = useState({ company: "", category: "طبي", sphereMin: "-6", sphereMax: "6", cylinderMin: "", cylinderMax: "", options: "" });
++  const [rows, setRows] = useState<TypeRow[]>([emptyTypeRow(1)]);
++  const [nextKey, setNextKey] = useState(2);
+   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
+   const refresh = useCallback(async () => { if (!branchId) return; try { setPrices((await requestJson(`/api/lens-prices?branchId=${branchId}`)).prices); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الأسعار"); } }, [branchId]);
+   useEffect(() => { void refresh(); }, [refresh]);
+-  async function save(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); setNotice(""); try {
+-    await requestJson("/api/lens-prices", { method: "POST", body: JSON.stringify({ ...form, branchId, sphereMin: Number(form.sphereMin), sphereMax: Number(form.sphereMax), cylinderMin: form.cylinderMin === "" ? null : Number(form.cylinderMin), cylinderMax: form.cylinderMax === "" ? null : Number(form.cylinderMax), costPrice: Number(form.costPrice), referencePrice: Number(form.referencePrice) }) });
+-    setNotice("تم حفظ نطاق السعر للفرع"); await refresh();
+-  } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ السعر"); } finally { setBusy(false); } }
++  const patchRow = (key: number, change: Partial<TypeRow>) => setRows(rows.map((r) => (r.key === key ? { ...r, ...change } : r)));
++  function addRow() { setRows([...rows, emptyTypeRow(nextKey)]); setNextKey(nextKey + 1); }
++  async function save(event: FormEvent) {
++    event.preventDefault(); setError(""); setNotice("");
++    const names = rows.map((r) => r.name.trim().toLowerCase());
++    if (new Set(names).size !== names.length) { setError("نوع العدسة مكرر في القائمة"); return; }
++    setBusy(true);
++    try {
++      const result = await requestJson("/api/lens-prices", { method: "POST", body: JSON.stringify({
++        branchId, company: form.company, category: form.category, options: form.options,
++        sphereMin: Number(form.sphereMin), sphereMax: Number(form.sphereMax),
++        cylinderMin: form.cylinderMin === "" ? null : Number(form.cylinderMin), cylinderMax: form.cylinderMax === "" ? null : Number(form.cylinderMax),
++        types: rows.map((r) => ({ name: r.name, costPrice: Number(r.costPrice), referencePrice: Number(r.referencePrice) })),
++      }) });
++      setNotice(`تم حفظ ${result.created} نوع بأسعارها للفرع`); setRows([emptyTypeRow(nextKey)]); setNextKey(nextKey + 1); await refresh();
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ الأسعار"); } finally { setBusy(false); }
++  }
+   return <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">قائمة مرجعية مستقلة لكل فرع</p><h2>أسعار العدسات</h2></div><span className="count-badge">{prices.length} نطاق سعر</span></div>
+     <div className="catalog-toolbar"><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label></div>
+-    {error && <div className="notice error">{error}</div>}{notice && <div className="notice success">{notice}</div>}
+-    <form className="catalog-form" onSubmit={save}><div className="section-heading"><div><p className="eyebrow">شركة ونوع ونطاق مقاس</p><h3>إضافة سعر مرجعي</h3></div></div><div className="catalog-fields">
+-      <label>شركة العدسات<input required minLength={2} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></label><label>نوع العدسة<input required minLength={2} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} /></label><label>الفئة<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label>
+-      <label>SPH من<input required type="number" step="0.25" value={form.sphereMin} onChange={(e) => setForm({ ...form, sphereMin: e.target.value })} /></label><label>SPH إلى<input required type="number" step="0.25" value={form.sphereMax} onChange={(e) => setForm({ ...form, sphereMax: e.target.value })} /></label><label>CYL من (اختياري)<input type="number" step="0.25" value={form.cylinderMin} onChange={(e) => setForm({ ...form, cylinderMin: e.target.value })} /></label><label>CYL إلى<input type="number" step="0.25" value={form.cylinderMax} onChange={(e) => setForm({ ...form, cylinderMax: e.target.value })} /></label>
+-      <label>الإضافات أو الخيارات<input placeholder="مثال: بلوكات، فوتوكروميك" value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} /></label><label>التكلفة<input required type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} /></label><label>السعر المرجعي<input required type="number" min="0" step="0.01" value={form.referencePrice} onChange={(e) => setForm({ ...form, referencePrice: e.target.value })} /></label><button className="primary" disabled={busy || !branchId}>{busy ? "جارٍ الحفظ…" : "حفظ السعر"}</button>
+-    </div></form>
++    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
++    <form className="catalog-form" onSubmit={save}><div className="section-heading"><div><p className="eyebrow">شركة واحدة، عدة أنواع، ولكل نوع سعره</p><h3>إضافة أسعار مرجعية</h3></div></div>
++      <div className="catalog-fields">
++        <label>شركة العدسات<input required minLength={2} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></label><label>الفئة<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label>
++        <label>SPH من<input required type="number" step="0.25" value={form.sphereMin} onChange={(e) => setForm({ ...form, sphereMin: e.target.value })} /></label><label>SPH إلى<input required type="number" step="0.25" value={form.sphereMax} onChange={(e) => setForm({ ...form, sphereMax: e.target.value })} /></label><label>CYL من (اختياري)<input type="number" step="0.25" value={form.cylinderMin} onChange={(e) => setForm({ ...form, cylinderMin: e.target.value })} /></label><label>CYL إلى<input type="number" step="0.25" value={form.cylinderMax} onChange={(e) => setForm({ ...form, cylinderMax: e.target.value })} /></label>
++        <label>الإضافات أو الخيارات<input placeholder="مثال: بلوكات، فوتوكروميك" value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} /></label>
++      </div>
++      <div className="supply-table-wrap"><div className="sale-subheading"><strong>أنواع العدسات لهذه الشركة</strong><span className="footnote">النطاق والخيارات أعلاه تنطبق على كل الأنواع؛ اكتب سعر كل نوع بجانبه.</span></div>
++        <div className="table-wrap"><table className="supply-table"><thead><tr><th>نوع العدسة</th><th>التكلفة</th><th>السعر المرجعي</th><th></th></tr></thead><tbody>
++          {rows.map((r, index) => <tr key={r.key}>
++            <td><input aria-label={`نوع العدسة ${index + 1}`} required minLength={2} maxLength={120} value={r.name} onChange={(e) => patchRow(r.key, { name: e.target.value })} placeholder="اسم النوع" /></td>
++            <td><input aria-label={`تكلفة ${r.name || `النوع ${index + 1}`}`} required type="number" min="0" step="0.01" value={r.costPrice} onChange={(e) => patchRow(r.key, { costPrice: e.target.value })} /></td>
++            <td><input aria-label={`سعر ${r.name || `النوع ${index + 1}`}`} required type="number" min="0" step="0.01" value={r.referencePrice} onChange={(e) => patchRow(r.key, { referencePrice: e.target.value })} /></td>
++            <td>{rows.length > 1 && <button type="button" className="quiet remove-sale-item" onClick={() => setRows(rows.filter((x) => x.key !== r.key))}>حذف</button>}</td></tr>)}
++        </tbody></table></div>
++        <button type="button" className="row-action" onClick={addRow} disabled={rows.length >= 30}>＋ إضافة نوع آخر</button>
++      </div>
++      <button className="primary" disabled={busy || !branchId}>{busy ? "جارٍ الحفظ…" : `حفظ ${rows.length > 1 ? `${rows.length} أنواع` : "السعر"}`}</button>
++    </form>
+     <div className="table-wrap"><table><thead><tr><th>الشركة والنوع</th><th>SPH</th><th>CYL</th><th>الإضافات</th><th>التكلفة</th><th>السعر المرجعي</th></tr></thead><tbody>{prices.map((p) => <tr key={p.id}><td><strong>{p.lens?.company}</strong><small>{p.lens?.name} · {p.lens?.category}</small></td><td>{p.sphere_min} إلى {p.sphere_max}</td><td>{p.cylinder_min === null ? "الكل" : `${p.cylinder_min} إلى ${p.cylinder_max}`}</td><td>{p.options || "—"}</td><td>{money(Number(p.cost_price))}</td><td>{money(Number(p.reference_price))}</td></tr>)}{prices.length === 0 && <tr><td colSpan={6} className="table-empty">لم تضاف أسعار لهذا الفرع بعد.</td></tr>}</tbody></table></div>
+-    <p className="footnote">النظام يمنع تداخل نطاقي قياسات متعارضين لنفس الشركة والنوع والخيارات. إدخال سعر العدسات تلقائيًا في الفاتورة يأتي بعد اكتمال وتدقيق جداول الفروع.</p>
++    <p className="footnote">النظام يمنع تداخل نطاقي قياسات متعارضين لنفس الشركة والنوع والخيارات. إذا تعارض نوع واحد لا يُحفظ أي نوع من المجموعة.</p>
+   </section>;
+ }
+ 
+ type Supply = { id: string; invoice_number: string; received_at: string; total_cost: number; supplier: { name: string } | null; items: { id: string; quantity: number; unit_cost: number; product: { name: string } | null }[] };
++type RegisteredLens = { id: string; name: string; category: string; company: string };
+ type SupplyLine = { key: string; productId?: string; newName?: string; category?: string; name: string; quantity: string; unitCost: string };
+ const localInput = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
+   const [branchId, setBranchId] = useState("");
+   const [products, setProducts] = useState<Product[]>([]);
++  const [lensTypes, setLensTypes] = useState<RegisteredLens[]>([]);
+   const [supplies, setSupplies] = useState<Supply[]>([]);
+   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+   const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput() });
+@@ -86,19 +118,33 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
+   const refresh = useCallback(async () => {
+     if (!branchId) return;
+-    try { const result = await requestJson(`/api/lens-supplies?branchId=${branchId}`); setSupplies(result.supplies ?? []); setProducts((result.products ?? []).filter((p: Product) => ["lens", "contact_lens"].includes(p.category))); setError(""); }
++    try { const result = await requestJson(`/api/lens-supplies?branchId=${branchId}`); setSupplies(result.supplies ?? []); setProducts((result.products ?? []).filter((p: Product) => ["lens", "contact_lens"].includes(p.category))); setLensTypes(result.lensTypes ?? []); setError(""); }
+     catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التوريدات"); }
+   }, [branchId]);
+   useEffect(() => { void refresh(); }, [refresh]);
+ 
+   const picked = new Set(lines.map((l) => l.productId).filter(Boolean));
+-  const visible = products.filter((p) => !filter.trim() || `${p.name} ${p.brand ?? ""} ${p.sku ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase()));
++  const pickedNames = new Set(lines.map((l) => l.name.trim().toLowerCase()));
++  const fullName = (l: RegisteredLens) => `${l.company} ${l.name}`.trim();
++  const q = filter.trim().toLowerCase();
++  const matches = (text: string) => !q || text.toLowerCase().includes(q);
++  const registeredNames = new Set(lensTypes.map((l) => fullName(l).toLowerCase()));
++  const companyEntries = Object.entries(lensTypes.filter((l) => matches(fullName(l))).reduce<Record<string, RegisteredLens[]>>((acc, l) => { (acc[l.company] ??= []).push(l); return acc; }, {}));
++  const otherProducts = products.filter((p) => !registeredNames.has(p.name.trim().toLowerCase()) && matches(`${p.name} ${p.brand ?? ""} ${p.sku ?? ""}`));
+   const total = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0), 0);
+   const patch = (key: string, change: Partial<SupplyLine>) => setLines(lines.map((l) => (l.key === key ? { ...l, ...change } : l)));
+   function toggle(p: Product) {
+     if (picked.has(p.id)) setLines(lines.filter((l) => l.productId !== p.id));
+     else setLines([...lines, { key: p.id, productId: p.id, name: p.name, quantity: "1", unitCost: "" }]);
+   }
++  // Picking a registered lens reuses the matching stock product when one exists; otherwise the server creates it once.
++  function toggleRegistered(l: RegisteredLens) {
++    const name = fullName(l); const key = name.toLowerCase();
++    if (pickedNames.has(key)) { setLines(lines.filter((x) => x.name.trim().toLowerCase() !== key)); return; }
++    const existing = products.find((p) => p.name.trim().toLowerCase() === key);
++    if (existing) setLines([...lines, { key: existing.id, productId: existing.id, name: existing.name, quantity: "1", unitCost: "" }]);
++    else setLines([...lines, { key: `reg-${l.id}`, newName: name, category: /لاصق/.test(l.category) ? "contact_lens" : "lens", name, quantity: "1", unitCost: "" }]);
++  }
+   function addNew() {
+     const name = newName.trim();
+     if (name.length < 2) return;
+@@ -134,9 +180,11 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+       </div>
+       <div className="lens-picker">
+         <div className="sale-subheading"><strong>أنواع العدسات المستلمة</strong><span className="footnote">اضغط على أي نوع لإضافته، واكتب كمية وسعر كل نوع.</span></div>
+-        {products.length > 0 && <>
++        {(products.length > 0 || lensTypes.length > 0) && <>
+           <input className="lens-filter" type="search" placeholder="ابحث في أنواع العدسات…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+-          <div className="lens-chips" role="group" aria-label="أنواع العدسات">{visible.map((p) => <button type="button" key={p.id} className={`lens-chip ${picked.has(p.id) ? "on" : ""}`} aria-pressed={picked.has(p.id)} onClick={() => toggle(p)}>{picked.has(p.id) ? "✓ " : "＋ "}{p.name}{p.brand ? ` — ${p.brand}` : ""}</button>)}{visible.length === 0 && <span className="footnote">لا توجد أنواع مطابقة.</span>}</div>
++          {companyEntries.map(([company, types]) => <div key={company} className="lens-company-group"><strong className="footnote">{company} — عدسات مسجلة في الأسعار والفواتير</strong><div className="lens-chips" role="group" aria-label={`عدسات ${company}`}>{types.map((l) => { const on = pickedNames.has(fullName(l).toLowerCase()); return <button type="button" key={l.id} className={`lens-chip ${on ? "on" : ""}`} aria-pressed={on} onClick={() => toggleRegistered(l)}>{on ? "✓ " : "＋ "}{l.name}</button>; })}</div></div>)}
++          {otherProducts.length > 0 && <div className="lens-company-group"><strong className="footnote">أصناف عدسات أخرى بالمخزون</strong><div className="lens-chips" role="group" aria-label="أصناف العدسات">{otherProducts.map((p) => <button type="button" key={p.id} className={`lens-chip ${picked.has(p.id) ? "on" : ""}`} aria-pressed={picked.has(p.id)} onClick={() => toggle(p)}>{picked.has(p.id) ? "✓ " : "＋ "}{p.name}{p.brand ? ` — ${p.brand}` : ""}</button>)}</div></div>}
++          {companyEntries.length === 0 && otherProducts.length === 0 && <span className="footnote">لا توجد أنواع مطابقة.</span>}
+         </>}
+         <div className="lens-new"><input placeholder={products.length ? "نوع جديد غير موجود في القائمة" : "اكتب اسم أول نوع عدسة"} maxLength={160} value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNew(); } }} />
+           <select aria-label="فئة النوع الجديد" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}><option value="lens">عدسة طبية</option><option value="contact_lens">عدسة لاصقة</option></select>
+diff --git a/src/components/central-cash.tsx b/src/components/central-cash.tsx
+new file mode 100644
+index 0000000..9107e75
+--- /dev/null
++++ b/src/components/central-cash.tsx
+@@ -0,0 +1,40 @@
++"use client";
++import { useCallback, useEffect, useState } from "react";
++
++type Deposit = { id: string; amount: number; description: string | null; created_at: string; seller: string };
++type Central = { id: string; name: string; balance: number; deposits: Deposit[] } | null;
++const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
++const when = (iso: string) => new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
++
++/** Owner-only: balance of the brand's central cash box and every seller deposit into it. */
++export default function CentralCash() {
++  const [central, setCentral] = useState<Central>(null);
++  const [loaded, setLoaded] = useState(false);
++  const [error, setError] = useState("");
++  const load = useCallback(async () => {
++    try {
++      const r = await fetch("/api/operations?module=central", { cache: "no-store" });
++      const j = await r.json().catch(() => ({}));
++      if (!r.ok) throw new Error(j.error ?? "تعذر تحميل الخزنة المركزية");
++      setCentral(j.central ?? null); setError("");
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الخزنة المركزية"); } finally { setLoaded(true); }
++  }, []);
++  useEffect(() => { void load(); }, [load]);
++  useEffect(() => { window.addEventListener("shift-changed", load); return () => window.removeEventListener("shift-changed", load); }, [load]);
++
++  if (!loaded) return null;
++  return <section className="panel operations-panel">
++    <div className="section-heading"><div><p className="eyebrow">رصيد البراند النقدي</p><h2>الخزنة المركزية</h2></div>{central && <button type="button" className="row-action" onClick={() => void load()}>تحديث</button>}</div>
++    {error && <div className="notice error" role="alert">{error}</div>}
++    {!error && !central && <div className="notice error">لم يتم إنشاء الخزنة المركزية؛ طبّق آخر migration على قاعدة البيانات.</div>}
++    {central && <>
++      <div className="ops-account-grid"><article className="ops-account"><small>{central.name}</small><strong>الرصيد الحالي</strong><b>{money(central.balance)}</b></article></div>
++      <h3 className="ops-subtitle">توريدات البائعين</h3>
++      <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>البائع</th><th>المبلغ</th><th>البيان</th></tr></thead><tbody>
++        {central.deposits.map((d) => <tr key={d.id}><td>{when(d.created_at)}</td><td>{d.seller}</td><td><strong>{money(d.amount)}</strong></td><td>{d.description ?? "—"}</td></tr>)}
++        {central.deposits.length === 0 && <tr><td colSpan={4} className="table-empty">لا توجد توريدات بعد.</td></tr>}
++      </tbody></table></div>
++      <p className="footnote">كل توريد يخصم من درج وردية البائع ويضاف هنا في عملية واحدة، فلا يظهر الكاش مرتين في إجمالي الخزائن.</p>
++    </>}
++  </section>;
++}
+diff --git a/src/components/sales-section.tsx b/src/components/sales-section.tsx
+index d752e50..ededb6c 100644
+--- a/src/components/sales-section.tsx
++++ b/src/components/sales-section.tsx
+@@ -5,7 +5,7 @@ import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "
+ type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
+ type Customer = { id: string; full_name: string; phone: string | null; email: string | null };
+ type SaleItemDraft = { name: string; quantity: number; productId: string; itemKind: "product" | "service" };
+-type CatalogProduct = { id: string; name: string; category: string; sku: string | null; stock: { quantity: number; reference_price: number; cost_price: number } };
++type CatalogProduct = { id: string; name: string; category: string; sku: string | null; stock: { quantity: number; reference_price: number } };
+ type LensType = { id: string; name: string; category: string; company: string };
+ type LensSelection = { lensTypeId: string; options: string; rightSphere: string; rightCylinder: string; rightAxis: string; leftSphere: string; leftCylinder: string; leftAxis: string; add: string; pupilDistance: string };
+ type LensQuote = { lensTypeId: string; lensTypeName: string; company: string; right: { priceId: string; referencePrice: number }; left: { priceId: string; referencePrice: number }; pairReferencePrice: number };
+diff --git a/src/components/shift-panel.tsx b/src/components/shift-panel.tsx
+index cd96341..995d4d0 100644
+--- a/src/components/shift-panel.tsx
++++ b/src/components/shift-panel.tsx
+@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from "react";
+ 
+ type Shift = { id: string; branch_id: string; cash_account_id: string; opening_cash: number; closing_cash?: number | null; status: "open" | "closed"; opened_at: string; closed_at?: string | null; branches?: { name: string } | null; cash_accounts?: { name: string } | null };
+ type Account = { id: string; branch_id: string; name: string };
+-type ShiftData = { owner: boolean; shifts: Shift[]; accounts: Account[] };
++type Deposit = { id: string; amount: number; description: string | null; created_at: string };
++type ShiftData = { owner: boolean; shifts: Shift[]; accounts: Account[]; deposits: Deposit[] };
+ 
+ const pad = (n: number) => String(n).padStart(2, "0");
+ export const clock = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`; };
+@@ -17,7 +18,7 @@ async function loadShifts(): Promise<ShiftData> {
+   const r = await fetch("/api/shifts", { cache: "no-store" });
+   const j = await r.json().catch(() => ({}));
+   if (!r.ok) throw new Error(j.error ?? "تعذر تحميل الوردية");
+-  return { owner: Boolean(j.owner), shifts: j.shifts ?? [], accounts: j.accounts ?? [] };
++  return { owner: Boolean(j.owner), shifts: j.shifts ?? [], accounts: j.accounts ?? [], deposits: j.deposits ?? [] };
+ }
+ 
+ function useNow(active: boolean) {
+@@ -42,6 +43,8 @@ export default function ShiftPanel() {
+   const [accountId, setAccountId] = useState("");
+   const [openingCash, setOpeningCash] = useState("0");
+   const [closingCash, setClosingCash] = useState("");
++  const [depositAmount, setDepositAmount] = useState("");
++  const [depositNotes, setDepositNotes] = useState("");
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState("");
+   const [message, setMessage] = useState("");
+@@ -61,7 +64,7 @@ export default function ShiftPanel() {
+       const r = await fetch("/api/shifts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+       const j = await r.json().catch(() => ({}));
+       if (!r.ok) throw new Error(j.error ?? "تعذر تنفيذ العملية");
+-      setMessage(done); setClosingCash(""); await load(); window.dispatchEvent(new Event("shift-changed"));
++      setMessage(done); setClosingCash(""); setDepositAmount(""); setDepositNotes(""); await load(); window.dispatchEvent(new Event("shift-changed"));
+     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تنفيذ العملية"); } finally { setBusy(false); }
+   }
+ 
+@@ -80,6 +83,12 @@ export default function ShiftPanel() {
+       {open ? (
+         <div className="shift-running">
+           <div className="shift-timer" aria-live="off"><span>الوقت المنقضي</span><strong>{clock(now - new Date(open.opened_at).getTime())}</strong><small>بدأت {day(open.opened_at)} الساعة {time(open.opened_at)} — {open.branches?.name ?? "الفرع"} · {open.cash_accounts?.name ?? "الخزنة"}</small></div>
++          <form className="shift-form" onSubmit={(e) => { e.preventDefault(); void send({ action: "deposit", shiftId: open.id, amount: Number(depositAmount), notes: depositNotes }, "تم تسجيل التوريد للخزنة المركزية وخصمه من درج الوردية"); }}>
++            <p className="footnote">توريد كاش للخزنة المركزية: يُخصم من درج الوردية ويظهر للمالك فورًا. اعدّ الكاش المتبقي فقط عند الإغلاق.</p>
++            <label>مبلغ التوريد<input required type="number" min="0.01" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} /></label>
++            <label>ملاحظة (اختياري)<input maxLength={200} value={depositNotes} onChange={(e) => setDepositNotes(e.target.value)} /></label>
++            <button className="primary" disabled={busy || depositAmount === "" || Number(depositAmount) <= 0}>توريد للخزنة المركزية</button>
++          </form>
+           <form className="shift-form" onSubmit={(e) => { e.preventDefault(); void send({ action: "close", shiftId: open.id, closingCash: Number(closingCash), notes: "" }, `تم إغلاق الوردية وتسجيل ${hoursLabel(now - new Date(open.opened_at).getTime())} عمل`); }}>
+             <p className="footnote">كاش البداية {money(Number(open.opening_cash))}</p>
+             <label>العد الفعلي للكاش عند الإغلاق<input required type="number" min="0" step="0.01" value={closingCash} onChange={(e) => setClosingCash(e.target.value)} /></label>
+@@ -96,6 +105,12 @@ export default function ShiftPanel() {
+           <button className="primary" disabled={busy || !account}>بدء اليومية</button>
+         </form>
+       )}
++      {data.deposits.length > 0 && <>
++        <h3 className="ops-subtitle">توريداتي للخزنة المركزية</h3>
++        <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الوقت</th><th>المبلغ</th><th>البيان</th></tr></thead><tbody>
++          {data.deposits.slice(0, 10).map((d) => <tr key={d.id}><td>{day(d.created_at)}</td><td>{time(d.created_at)}</td><td><strong>{money(Number(d.amount))}</strong></td><td>{d.description ?? "—"}</td></tr>)}
++        </tbody></table></div>
++      </>}
+       {history.length > 0 && <>
+         <h3 className="ops-subtitle">سجل ساعات العمل</h3>
+         <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الفرع</th><th>من</th><th>إلى</th><th>المدة</th><th>العد عند الإغلاق</th></tr></thead><tbody>
+diff --git a/src/components/staff-hours.tsx b/src/components/staff-hours.tsx
+new file mode 100644
+index 0000000..8ccdec9
+--- /dev/null
++++ b/src/components/staff-hours.tsx
+@@ -0,0 +1,77 @@
++"use client";
++import { useCallback, useEffect, useMemo, useState } from "react";
++import { hoursLabel } from "@/components/shift-panel";
++
++type Branch = { id: string; name: string; status: "ACTIVE" | "INACTIVE" };
++type Shift = {
++  id: string; user_id: string; branch_id: string; opening_cash: number; closing_cash: number | null; expected_cash: number | null; variance: number | null;
++  status: "open" | "closed"; opened_at: string; closed_at: string | null; closing_notes: string | null;
++  user_profiles: { full_name: string; phone: string | null } | null; branches: { name: string } | null;
++};
++const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
++const dayText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { weekday: "short", day: "numeric", month: "short" }).format(new Date(iso));
++const timeText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
++const localDay = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
++const monthStart = () => { const d = new Date(); return localDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
++
++/** Owner-only report of every seller's worked hours, built from their opened/closed shifts. */
++export default function StaffHours({ branches }: { branches: Branch[] }) {
++  const [from, setFrom] = useState(monthStart);
++  const [to, setTo] = useState(() => localDay(new Date()));
++  const [branchId, setBranchId] = useState("");
++  const [shifts, setShifts] = useState<Shift[]>([]);
++  const [error, setError] = useState("");
++  const [busy, setBusy] = useState(false);
++  const [now, setNow] = useState(() => Date.now());
++  const [sellerFilter, setSellerFilter] = useState("");
++
++  const load = useCallback(async () => {
++    setBusy(true); setError("");
++    try {
++      const params = new URLSearchParams({ from: new Date(`${from}T00:00:00`).toISOString(), to: new Date(`${to}T23:59:59.999`).toISOString() });
++      if (branchId) params.set("branchId", branchId);
++      const r = await fetch(`/api/shifts?${params}`, { cache: "no-store" });
++      const j = await r.json().catch(() => ({}));
++      if (!r.ok) throw new Error(j.error ?? "تعذر تحميل الورديات");
++      setShifts(j.shifts ?? []); setNow(Date.now());
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الورديات"); } finally { setBusy(false); }
++  }, [from, to, branchId]);
++  useEffect(() => { void load(); }, [load]);
++  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(id); }, []);
++
++  const duration = useCallback((s: Shift) => (s.closed_at ? new Date(s.closed_at).getTime() : now) - new Date(s.opened_at).getTime(), [now]);
++  const summary = useMemo(() => {
++    const byUser = new Map<string, { id: string; name: string; phone: string; shifts: number; ms: number; days: Set<string>; open: boolean }>();
++    for (const s of shifts) {
++      const row = byUser.get(s.user_id) ?? { id: s.user_id, name: s.user_profiles?.full_name ?? "—", phone: s.user_profiles?.phone ?? "", shifts: 0, ms: 0, days: new Set<string>(), open: false };
++      row.shifts += 1; row.ms += Math.max(0, duration(s)); row.days.add(localDay(new Date(s.opened_at))); if (s.status === "open") row.open = true;
++      byUser.set(s.user_id, row);
++    }
++    return [...byUser.values()].sort((a, b) => b.ms - a.ms);
++  }, [shifts, duration]);
++  const visibleShifts = sellerFilter ? shifts.filter((s) => s.user_id === sellerFilter) : shifts;
++  const totalMs = summary.reduce((sum, r) => sum + r.ms, 0);
++  const activeBranches = branches.filter((b) => b.status === "ACTIVE");
++
++  return <section className="panel operations-panel">
++    <div className="section-heading"><div><p className="eyebrow">من الورديات المفتوحة والمغلقة</p><h2>ساعات عمل الموظفين</h2></div><span className="count-badge">الإجمالي: {hoursLabel(totalMs)}</span></div>
++    {error && <div className="notice error" role="alert">{error}</div>}
++    <div className="ops-toolbar">
++      <label>من<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
++      <label>إلى<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
++      <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
++      <button type="button" className="row-action" onClick={() => void load()} disabled={busy}>{busy ? "جارٍ التحديث…" : "تحديث"}</button>
++    </div>
++    <h3 className="ops-subtitle">ملخص لكل موظف</h3>
++    <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>أيام العمل</th><th>عدد الورديات</th><th>إجمالي الساعات</th><th>متوسط الوردية</th><th></th></tr></thead><tbody>
++      {summary.map((r) => <tr key={r.id}><td><strong>{r.name}</strong><small>{r.phone}</small></td><td>{r.days.size}</td><td>{r.shifts}</td><td><strong>{hoursLabel(r.ms)}</strong><small>{(r.ms / 3600000).toFixed(1)} ساعة</small></td><td>{hoursLabel(r.ms / r.shifts)}</td><td>{r.open && <span className="status active">يعمل الآن</span>} <button type="button" className="row-action" onClick={() => setSellerFilter(sellerFilter === r.id ? "" : r.id)}>{sellerFilter === r.id ? "عرض الكل" : "تفاصيل"}</button></td></tr>)}
++      {summary.length === 0 && <tr><td colSpan={6} className="table-empty">لا توجد ورديات في هذه الفترة.</td></tr>}
++    </tbody></table></div>
++    <h3 className="ops-subtitle">سجل الورديات{sellerFilter ? ` — ${summary.find((r) => r.id === sellerFilter)?.name ?? ""}` : ""}</h3>
++    <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الموظف</th><th>الفرع</th><th>من</th><th>إلى</th><th>المدة</th><th>العد الفعلي</th><th>الفرق</th></tr></thead><tbody>
++      {visibleShifts.map((s) => <tr key={s.id}><td>{dayText(s.opened_at)}</td><td>{s.user_profiles?.full_name ?? "—"}</td><td>{s.branches?.name ?? "—"}</td><td>{timeText(s.opened_at)}</td><td>{s.closed_at ? timeText(s.closed_at) : <span className="status active">جارية</span>}</td><td><strong>{hoursLabel(duration(s))}</strong></td><td>{s.closing_cash == null ? "—" : money(Number(s.closing_cash))}</td><td className={s.variance != null && Number(s.variance) !== 0 ? "balance-due" : ""}>{s.variance == null ? "—" : money(Number(s.variance))}</td></tr>)}
++      {visibleShifts.length === 0 && <tr><td colSpan={8} className="table-empty">لا توجد ورديات.</td></tr>}
++    </tbody></table></div>
++    <p className="footnote">الساعات = من فتح اليومية حتى إغلاقها. الوردية المفتوحة تُحسب حتى الآن. «الفرق» بين العد الفعلي والمتوقع، وهو ظاهر للمالك فقط.</p>
++  </section>;
++}
+diff --git a/src/components/workspace.tsx b/src/components/workspace.tsx
+index 64c8f93..91b315a 100644
+--- a/src/components/workspace.tsx
++++ b/src/components/workspace.tsx
+@@ -11,6 +11,8 @@ import ShiftPanel, { ShiftBadge } from "@/components/shift-panel";
+ import DailyOverview from "@/components/daily-overview";
+ import DeliveriesPanel from "@/components/deliveries-panel";
+ import { InstallButton } from "@/components/pwa";
++import CentralCash from "@/components/central-cash";
++import StaffHours from "@/components/staff-hours";
+ 
+ type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
+ type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
+@@ -122,7 +124,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
+       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
+       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
+-      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
++      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="staff-hours" active={activeTab} setActive={setActiveTab}>ساعات الموظفين</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+     </nav>
+     <Notice error={error} message={message}/>
+     {activeTab === "overview" && <>
+@@ -141,7 +143,9 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
+     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+     {isOwner && activeTab === "purchases" && <OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
++    {isOwner && activeTab === "finance" && <CentralCash />}
+     {isOwner && activeTab === "finance" && <OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
++    {isOwner && activeTab === "staff-hours" && <StaffHours branches={branches} />}
+     {isOwner && activeTab === "staff-finance" && <OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
+     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
+diff --git a/supabase/migrations/20261017120000_central_cash_deposits.sql b/supabase/migrations/20261017120000_central_cash_deposits.sql
+new file mode 100644
+index 0000000..c20b93b
+--- /dev/null
++++ b/supabase/migrations/20261017120000_central_cash_deposits.sql
+@@ -0,0 +1,72 @@
++-- Central cash box (الخزنة المركزية): one brand-level account that sellers deposit into from their shift drawer.
++
++alter table public.cash_accounts alter column branch_id drop not null;
++alter table public.cash_accounts add column is_central boolean not null default false;
++alter table public.cash_accounts add constraint cash_accounts_branch_or_central_check check (is_central or branch_id is not null);
++create unique index cash_accounts_one_central_idx on public.cash_accounts(is_central) where is_central;
++
++insert into public.cash_accounts(branch_id,name,account_type,payment_method,opening_balance,is_central)
++values (null,'الخزنة المركزية','cash','cash',0,true);
++
++-- Allow the new ledger entry type.
++do $$
++declare c text;
++begin
++  select conname into c from pg_constraint
++  where conrelid='public.cash_transactions'::regclass and contype='c' and pg_get_constraintdef(oid) like '%transaction_type%';
++  if c is not null then execute format('alter table public.cash_transactions drop constraint %I', c); end if;
++end $$;
++alter table public.cash_transactions add constraint cash_transactions_transaction_type_check
++  check (transaction_type in ('sale_payment','supplier_payment','expense','payroll','commission','adjustment','central_deposit'));
++
++-- The central account has no branch, so the seller-shift trigger must not demand a branch shift for it.
++create or replace function public.attach_seller_transaction_shift() returns trigger
++language plpgsql security definer set search_path = '' as $$
++declare v_branch uuid; v_method text; v_shift uuid;
++begin
++ select branch_id,payment_method into v_branch,v_method from public.cash_accounts where id=new.cash_account_id;
++ if v_branch is null then return new; end if;
++ if exists(select 1 from public.user_roles ur join public.roles r on r.id=ur.role_id where ur.user_id=new.created_by and r.key='salesperson') then
++   select id into v_shift from public.seller_shifts where user_id=new.created_by and branch_id=v_branch and status='open';
++   if v_shift is null then raise exception 'seller shift required'; end if;
++   if v_method='cash' and not exists(select 1 from public.seller_shifts where id=v_shift and cash_account_id=new.cash_account_id) then raise exception 'cash account does not match open shift'; end if;
++   new.shift_id:=v_shift;
++ end if;
++ return new;
++end $$;
++
++-- Same balance rule the app already uses: opening balance + ledger, ignoring the opening-balance ledger row.
++create or replace function public.cash_account_balance(p_account uuid) returns numeric
++language sql stable security definer set search_path = '' as $$
++  select round(a.opening_balance + coalesce((
++    select sum(case when t.direction='in' then t.amount else -t.amount end)
++    from public.cash_transactions t
++    where t.cash_account_id=a.id and t.description is distinct from 'رصيد افتتاحي'),0),2)
++  from public.cash_accounts a where a.id=p_account
++$$;
++
++-- A seller moves cash from the open shift drawer to the central box. Both ledger rows are written in one transaction,
++-- and the drawer entry stays inside the shift so the closing reconciliation remains correct.
++create or replace function public.deposit_to_central(p_shift uuid,p_user uuid,p_amount numeric,p_notes text default '')
++returns uuid language plpgsql security definer set search_path = '' as $$
++declare v_shift public.seller_shifts%rowtype; v_central uuid; v_available numeric(12,2); v_ref uuid := gen_random_uuid(); v_note text; v_amount numeric(12,2);
++begin
++ v_amount := round(coalesce(p_amount,0),2);
++ if v_amount<=0 then raise exception 'invalid amount'; end if;
++ select * into v_shift from public.seller_shifts where id=p_shift and user_id=p_user and status='open' for update;
++ if not found then raise exception 'open shift not found'; end if;
++ select id into v_central from public.cash_accounts where is_central and active;
++ if v_central is null then raise exception 'central account missing'; end if;
++ select round(v_shift.opening_cash+coalesce(sum(case when direction='in' then amount else -amount end),0),2) into v_available
++ from public.cash_transactions where shift_id=v_shift.id and cash_account_id=v_shift.cash_account_id;
++ if v_amount>v_available then raise exception 'amount exceeds drawer cash'; end if;
++ v_note := left(nullif(trim(coalesce(p_notes,'')),''),200);
++ insert into public.cash_transactions(cash_account_id,direction,amount,transaction_type,reference_id,description,created_by)
++ values(v_shift.cash_account_id,'out',v_amount,'central_deposit',v_ref,'توريد للخزنة المركزية'||coalesce(' — '||v_note,''),p_user);
++ insert into public.cash_transactions(cash_account_id,direction,amount,transaction_type,reference_id,description,created_by)
++ values(v_central,'in',v_amount,'central_deposit',v_ref,'توريد من بائع'||coalesce(' — '||v_note,''),p_user);
++ return v_ref;
++end $$;
++
++revoke all on function public.cash_account_balance(uuid), public.deposit_to_central(uuid,uuid,numeric,text) from public,anon,authenticated;
++grant execute on function public.cash_account_balance(uuid), public.deposit_to_central(uuid,uuid,numeric,text) to service_role;

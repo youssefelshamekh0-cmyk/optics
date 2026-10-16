@@ -36,6 +36,17 @@ export async function GET(request: Request) {
   const branchId = new URL(request.url).searchParams.get("branchId");
   if (branchId && !branchAllowed(user!,branchId)) return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
   const admin=getSupabaseAdmin() as any;
+  if(module==="central") {
+    if(!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
+    const account=await admin.from("cash_accounts").select("id,name").eq("is_central",true).maybeSingle();if(account.error)throw account.error;
+    if(!account.data)return Response.json({central:null});
+    const [balance,rows]=await Promise.all([admin.rpc("cash_account_balance",{p_account:account.data.id}),admin.from("cash_transactions").select("id,direction,amount,description,created_by,created_at").eq("cash_account_id",account.data.id).eq("transaction_type","central_deposit").order("created_at",{ascending:false}).limit(200)]);
+    if(balance.error||rows.error)throw balance.error??rows.error;
+    const actorIds=[...new Set((rows.data??[]).map((x:any)=>x.created_by).filter(Boolean))];
+    const profiles=actorIds.length?await admin.from("user_profiles").select("id,full_name").in("id",actorIds):{data:[],error:null};if(profiles.error)throw profiles.error;
+    const names=new Map((profiles.data??[]).map((x:any)=>[x.id,x.full_name]));
+    return Response.json({central:{id:account.data.id,name:account.data.name,balance:Number(balance.data??0),deposits:(rows.data??[]).map((x:any)=>({id:x.id,amount:Number(x.amount),description:x.description,created_at:x.created_at,seller:names.get(x.created_by)??"—"}))}});
+  }
   if(module==="inventory") {
     let stock=admin.from("branch_products").select("branch_id,product_id,quantity,cost_price,reference_price,products(name,sku,category)").order("updated_at",{ascending:false}).limit(300);
     let moves=admin.from("stock_movements").select("id,branch_id,product_id,quantity_delta,movement_type,reason,created_at,products(name,sku),branches(name)").order("created_at",{ascending:false}).limit(100);
