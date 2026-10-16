@@ -23,9 +23,14 @@ export async function GET(request: Request) {
     const { user, response } = await requirePermission("sales.read"); if (response) return response;
     const branchId = new URL(request.url).searchParams.get("branchId");
     if (branchId && !branchAllowed(user!, branchId)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
-    let q = getSupabaseAdmin().from("sales").select("id,invoice_number,branch_id,customer_id,delivery_status,grand_total,created_at,customers(full_name,phone),branches(name,code)").neq("delivery_status","cancelled").order("created_at",{ascending:false}).limit(200);
+    const admin=getSupabaseAdmin() as any;
+    let q = admin.from("sales").select("id,invoice_number,branch_id,customer_id,delivery_status,grand_total,notes,created_at,customers(full_name,phone),branches(name,code),sale_items(item_name,quantity,unit_price,line_total)").neq("delivery_status","cancelled").order("created_at",{ascending:false}).limit(200);
     if (branchId) q = q.eq("branch_id",branchId); else if (!user!.roles.includes("super_admin")) q = q.in("branch_id",user!.branchIds);
-    const { data,error }=await q; if(error) throw error; return Response.json({ sales:data??[] });
+    const { data,error }=await q; if(error) throw error;
+    const ids=(data??[]).map((s:any)=>s.id);
+    const paid=new Map<string,number>();
+    if(ids.length){const pay=await admin.from("sale_payments").select("sale_id,amount").in("sale_id",ids);if(pay.error)throw pay.error;for(const x of pay.data??[])paid.set(x.sale_id,(paid.get(x.sale_id)??0)+Number(x.amount));}
+    return Response.json({ sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;return {...s,paid_amount:p,due_amount:Math.max(0,Number(s.grand_total)-p)};}) });
   }
   const { user, response } = await owner(request); if (response) return response;
   const branchId = new URL(request.url).searchParams.get("branchId");

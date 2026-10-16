@@ -7,8 +7,10 @@ import SalesSection from "@/components/sales-section";
 import { LensPricesSection, LensSuppliesSection, ProductsSection } from "@/components/catalog-sections";
 import OperationsSection from "@/components/operations-section";
 import FinanceCharts from "@/components/finance-charts";
-import ShiftPanel from "@/components/shift-panel";
-
+import ShiftPanel, { ShiftBadge } from "@/components/shift-panel";
+import DailyOverview from "@/components/daily-overview";
+import DeliveriesPanel from "@/components/deliveries-panel";
+import { InstallButton } from "@/components/pwa";
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
@@ -113,7 +115,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <form onSubmit={handleLogin} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={loginPhone} onChange={(e) => { const value = e.target.value; setLoginPhone(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setLoginPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
     <Notice error={error} message={message}/><div className="secure-note"><span className="dot"/> الاتصال بالخادم مطلوب لحفظ كل عملية</div></div></main>;
 
-  return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-mark small">ن</div><div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{user.name.slice(0, 1)}</span><span>{user.name}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
+  return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-mark small">ن</div><div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{user.name.slice(0, 1)}</span><span>{user.name}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
     <nav className="workspace-tabs" aria-label="أقسام النظام" role="tablist">
       <Tab id="overview" active={activeTab} setActive={setActiveTab}>نظرة عامة</Tab>
       {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
@@ -127,13 +129,14 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "الفروع المتاحة لك تظهر هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
     <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={isOwner ? String(staff.length).padStart(2, "0") : "—"} detail={isOwner ? "حسابات المستخدمين" : "حسب صلاحيتك"}/></section>
     <ShiftPanel />
+    <DailyOverview />
     <FinanceCharts />
     <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
     </section></>}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
-    {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <OperationsSection module="deliveries" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+    {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {!isOwner && activeTab === "seller-finance" && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
