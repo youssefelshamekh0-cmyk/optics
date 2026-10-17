@@ -110,7 +110,7 @@ export async function GET(request: Request) {
 const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("delivery"),saleId:uuid,status:z.enum(["pending","processing","ready","delivered"]),notes:z.string().max(500).default("")}),
  z.object({action:z.literal("deliverAndCollect"),saleId:uuid,cashAccountId:uuid.optional().or(z.literal("")),discountAmount:z.number().min(0).max(100000000).default(0)}),
- z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
+ z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,operationId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
  z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().trim().min(2).max(300),operationId:uuid}),
  z.object({action:z.literal("transferReceive"),transferId:uuid}),
  z.object({action:z.literal("cashAccount"),branchId:uuid,name:z.string().trim().min(2).max(120),accountType:z.enum(["cash","bank","digital"]),paymentMethod:z.enum(["cash","card","instapay","other"]),openingBalance:z.number().min(0).max(100000000)}),
@@ -167,7 +167,7 @@ export async function POST(request:Request){
    const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
    const {error}=await admin.rpc("change_sale_delivery",{p_sale_id:parsed.data.saleId,p_status:parsed.data.status,p_actor:user!.id,p_notes:parsed.data.notes}); if(error)throw error; entityId=parsed.data.saleId;
  }else if(action==="adjust"){
-   if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {error}=await admin.rpc("adjust_stock",{p_branch_id:parsed.data.branchId,p_product_id:parsed.data.productId,p_delta:parsed.data.delta,p_reason:parsed.data.reason,p_actor:user!.id}); if(error)throw error;
+   if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("adjust_stock_idempotent",{p_operation_id:parsed.data.operationId,p_branch_id:parsed.data.branchId,p_product_id:parsed.data.productId,p_delta:parsed.data.delta,p_reason:parsed.data.reason,p_actor:user!.id}); if(error?.message.includes("operation id conflict"))return Response.json({error:"معرّف التسوية مستخدم لبيانات مختلفة"}, {status:409});if(error?.message.includes("insufficient product stock"))return Response.json({error:"التسوية ستجعل المخزون بالسالب"}, {status:409});if(error)throw error;entityId=data;
  }else if(action==="transfer"){
     if(!branchAllowed(user!,parsed.data.sourceBranchId)||!branchAllowed(user!,parsed.data.destinationBranchId))return Response.json({error:"ليس لديك وصول للفرعين"},{status:403});
     const {data,error}=await admin.rpc("transfer_stock",{p_source:parsed.data.sourceBranchId,p_destination:parsed.data.destinationBranchId,p_product:parsed.data.productId,p_quantity:parsed.data.quantity,p_reason:parsed.data.reason,p_actor:user!.id,p_operation_id:parsed.data.operationId});
