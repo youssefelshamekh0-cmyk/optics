@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
 type Item = { item_name: string; quantity: number; unit_price: number; line_total: number };
+type CashAccount = { id: string; branch_id: string; name: string; payment_method: string };
 type Sale = {
   id: string; invoice_number: number; branch_id: string; delivery_status: "pending" | "processing" | "ready" | "delivered"; grand_total: number; paid_amount: number; due_amount: number; notes: string | null; created_at: string;
   customers: { full_name: string; phone: string } | null; branches: { name: string } | null; sale_items?: Item[];
@@ -50,6 +51,8 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   const available = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && (isOwner || branchIds.includes(b.id))), [branches, branchIds, isOwner]);
   const [branchId, setBranchId] = useState("");
   const [sales, setSales] = useState<Sale[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<"all" | (typeof STATUSES)[number]>("all");
   const [payment, setPayment] = useState<"all" | "due" | "paid">("all");
   const [search, setSearch] = useState("");
@@ -61,7 +64,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
       const r = await fetch(`/api/operations?module=deliveries${branchId ? `&branchId=${encodeURIComponent(branchId)}` : ""}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تحميل التسليمات");
-      setSales(j.sales ?? []); setError("");
+      setSales(j.sales ?? []); setCashAccounts(j.accounts ?? []); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التسليمات"); }
   }, [branchId]);
   useEffect(() => { void load(); }, [load]);
@@ -69,10 +72,11 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   async function deliverAndCollect(saleId: string) {
     setBusy(true); setError(""); setNotice("");
     try {
-      const r = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deliverAndCollect", saleId }) });
+      const r = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deliverAndCollect", saleId, cashAccountId: selectedAccounts[saleId] ?? "" }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تسليم الفاتورة وتسجيل المتبقي");
-      setNotice("تم تسليم الفاتورة وتسجيل المتبقي كدفعة نقدية"); await load();
+      setSelectedAccounts((current) => { const next = { ...current }; delete next[saleId]; return next; });
+      setNotice("تم تسليم الفاتورة وتسجيل المتبقي في حساب الخزنة المختار"); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسليم الفاتورة"); } finally { setBusy(false); }
   }
 
@@ -107,12 +111,12 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
         <button type="button" className={`status-chip ${status === "all" ? "on" : ""}`} aria-pressed={status === "all"} onClick={() => setStatus("all")}>الكل <b>{bySearchAndPayment.length}</b></button>
         {STATUSES.map((k) => <button type="button" key={k} className={`status-chip s-${k} ${status === k ? "on" : ""}`} aria-pressed={status === k} onClick={() => setStatus(k)}>{statusLabel[k]} <b>{counts[k]}</b></button>)}
       </div>
-      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th><th>تحديث التسليم</th><th>تسليم</th><th>طباعة</th></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th><th>تحديث التسليم</th><th>حساب الخزنة للتحصيل</th><th>تسليم</th><th>طباعة</th></tr></thead><tbody>
         {rows.map((s) => <tr key={s.id}><td>#{s.invoice_number}<small>{dateOf(s.created_at)}</small></td><td>{s.customers?.full_name}<small>{s.customers?.phone}</small></td><td>{s.branches?.name}</td><td>{money(Number(s.grand_total))}</td><td>{s.due_amount > 0 ? <strong className="due">{money(s.due_amount)}</strong> : "—"}</td>
           <td><span className={`status-pill s-${s.delivery_status}`}>{statusLabel[s.delivery_status]}</span></td>
           <td><select className="status-select" aria-label={`حالة الفاتورة ${s.invoice_number}`} value={s.delivery_status} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => void updateStatus(s.id, e.target.value)}>{STATUSES.map((x) => <option value={x} key={x}>{statusLabel[x]}</option>)}</select></td>
-          <td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered"} onClick={() => void deliverAndCollect(s.id)}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
-        {rows.length === 0 && <tr><td colSpan={9} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
+          <td>{s.due_amount > 0 ? <select className="status-select" aria-label={`حساب خزنة تحصيل الفاتورة ${s.invoice_number}`} value={selectedAccounts[s.id] ?? ""} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => setSelectedAccounts((current) => ({ ...current, [s.id]: e.target.value }))}><option value="">اختر حساب الخزنة</option>{cashAccounts.filter((account) => account.branch_id === s.branch_id).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select> : "لا يوجد متبقي"}</td><td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered" || (s.due_amount > 0 && !selectedAccounts[s.id])} onClick={() => void deliverAndCollect(s.id)}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
+        {rows.length === 0 && <tr><td colSpan={10} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
       </tbody></table></div>
       <p className="footnote">كل تغيير حالة يُحفظ في سجل تسليم الفاتورة. القائمة تعرض آخر 200 فاتورة غير ملغاة.</p>
     </section>
