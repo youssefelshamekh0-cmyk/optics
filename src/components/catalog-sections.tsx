@@ -20,6 +20,9 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [countDrafts, setCountDrafts] = useState<Record<string, string>>({});
+  const [stockTakeNotes, setStockTakeNotes] = useState("");
+  const [stockTakeOperationId, setStockTakeOperationId] = useState("");
   const [form, setForm] = useState({ sku: "", name: "", category: "frame", brand: "", model: "", color: "", size: "", quantity: "0", costPrice: "0", referencePrice: "0" });
   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
   useEffect(() => { setCountDrafts({}); }, [branchId]);
@@ -51,6 +54,8 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
     const counts = countedProducts.map(product => ({ productId: product.id, countedQuantity: Number(countDrafts[product.id] ?? product.stock.quantity) }));
     if (counts.some(row => !Number.isInteger(row.countedQuantity) || row.countedQuantity < 0 || row.countedQuantity > 100000)) { setError("راجع كميات الجرد؛ يجب أن تكون أعدادًا صحيحة غير سالبة"); return; }
     if (!window.confirm("سيتم اعتماد الكميات الفعلية وتسجيل فروق الجرد كحركات تسوية غير قابلة للمحو. هل تريد المتابعة؟")) return;
+    const operationId = stockTakeOperationId || crypto.randomUUID();
+    setStockTakeOperationId(operationId);
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await requestJson("/api/inventory/stock-takes", { method: "POST", body: JSON.stringify({ operationId, branchId, notes: stockTakeNotes, counts }) });
