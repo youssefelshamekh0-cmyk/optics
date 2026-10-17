@@ -194,7 +194,7 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
     }
   }
 
-  if (method === "POST" && parsedUrl.pathname === "/api/sales") {
+  if (method === "POST" && (parsedUrl.pathname === "/api/sales" || parsedUrl.pathname === "/api/customers")) {
     const raw = typeof init?.body === "string" ? init.body : "{}";
     const payload = JSON.parse(raw) as Record<string, unknown>;
     const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
@@ -265,11 +265,23 @@ export async function syncPendingOperations(): Promise<void> {
       notify();
       let response: Response;
       let data: Record<string, unknown>;
+      let payloadToSend = { ...operation.payload };
+      if (operation.type === "sale.create" && typeof payloadToSend.customerId === "string") {
+        const mapped = await getCachedJson<{ serverId: string }>("customer-map:" + payloadToSend.customerId);
+        if (mapped?.serverId) payloadToSend.customerId = mapped.serverId;
+        else {
+          const localCustomerOperation = operations.find(item => item.type === "customer.create" && item.localCustomerId === payloadToSend.customerId);
+          if (localCustomerOperation && localCustomerOperation.status !== "synced") {
+            await putOperation({ ...operation, status: "pending", updatedAt: Date.now(), message: "بانتظار مزامنة بيانات العميل أولاً" });
+            continue;
+          }
+        }
+      }
       try {
         response = await fetch(operation.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(operation.payload),
+          body: JSON.stringify(payloadToSend),
           cache: "no-store",
         });
         data = await response.json().catch(() => ({}));
