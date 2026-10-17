@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { clock, hoursLabel } from "@/components/shift-panel";
 
 type DayRow = { date: string; invoices: number; sales: number; income: number; expenses: number; variance: number | null; shifts: number; status: "deficit" | "surplus" | "balanced" | "open" | "unknown" };
-type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; due: number; status: string; created_at: string };
+type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; dailyCollected: number; createdOnDay: boolean; due: number; status: string; created_at: string };
 type Daily = {
   role: "owner" | "seller"; date: string; today: string; branches: { id: string; name: string }[]; branchId: string;
   summary: { invoices: number; sales: number; collected: number; due: number; expenses: number; cashIn: number; cashOut: number };
@@ -93,9 +93,9 @@ export default function DailyOverview({ initialView = "list", }: { initialView?:
       </div>
 
       <h3 className="ops-subtitle">فواتير اليوم</h3>
-      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th>{owner && <th>البائع</th>}<th>الفرع</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
-        {data.invoices.map((i) => <tr key={i.id} className={i.status === "cancelled" ? "row-cancelled" : ""}><td>#{i.invoice_number}<small>{time(i.created_at)}</small></td><td>{i.customer}<small>{i.phone}</small></td>{owner && <td>{i.seller}</td>}<td>{i.branch}</td><td>{money(i.total)}</td><td>{money(i.paid)}</td><td>{i.due > 0 ? <strong className="due">{money(i.due)}</strong> : "—"}</td><td>{statusLabel[i.status] ?? i.status}</td></tr>)}
-        {data.invoices.length === 0 && <tr><td colSpan={owner ? 8 : 7} className="table-empty">لا توجد فواتير في هذا اليوم.</td></tr>}
+      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th>{owner && <th>البائع</th>}<th>الفرع</th><th>الإجمالي</th><th>المدفوع إجمالًا</th><th>تحصيل اليوم</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
+        {data.invoices.map((i) => <tr key={i.id} className={i.status === "cancelled" ? "row-cancelled" : ""}><td>#{i.invoice_number}<small>{time(i.created_at)}</small>{!i.createdOnDay && <small className="status active">فاتورة أقدم · تحصيل اليوم</small>}</td><td>{i.customer}<small>{i.phone}</small></td>{owner && <td>{i.seller}</td>}<td>{i.branch}</td><td>{money(i.total)}</td><td>{money(i.paid)}</td><td>{i.dailyCollected > 0 ? <strong className="good">{money(i.dailyCollected)}</strong> : "—"}</td><td>{i.due > 0 ? <strong className="due">{money(i.due)}</strong> : "—"}</td><td>{statusLabel[i.status] ?? i.status}</td></tr>)}
+        {data.invoices.length === 0 && <tr><td colSpan={owner ? 9 : 8} className="table-empty">لا توجد فواتير أو تحصيلات مسجلة في هذا اليوم.</td></tr>}
       </tbody></table></div>
 
       {owner && <>
