@@ -22,11 +22,10 @@ const saleTypeLabels: Record<string, string> = { medical_glasses: "نظارة ط
 const statusLabels: Record<Sale["delivery_status"], string> = { pending: "جديد", processing: "قيد التجهيز", ready: "جاهز", delivered: "تم التسليم", cancelled: "ملغي" };
 const methodLabels: Record<string, string> = { cash: "نقدي", card: "بطاقة", instapay: "إنستاباي", other: "أخرى" };
 
+import { cachedRequestJson } from "@/lib/offline-sync";
+
 async function requestJson(url: string, init?: RequestInit) {
-  const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
-  return data;
+  return cachedRequestJson<any>(url, init);
 }
 
 const money = (value: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(value);
@@ -149,7 +148,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
           add: lensSelection.add, pupilDistance: lensSelection.pupilDistance } : null,
         finalTotal: Number(finalTotal), initialPayment: Number(initialPayment), paymentMethod, notes,
       }) });
-      setNotice(`تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
+      setNotice(result.queued ? "تم حفظ الفاتورة على هذا الجهاز، وهي معلّقة لحين عودة الإنترنت والتحقق من المخزون. لا تعتبر فاتورة معتمدة بعد." : `تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
       setItems([]); setSaleType("medical_glasses"); setLensSelection(emptyLensSelection); setLensQuote(null); setFinalTotal(""); setInitialPayment("0"); setPaymentMethod("cash"); setNotes(""); setCustomerId(""); setCustomerSearch(""); setSelectedCustomerLabel("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر إنشاء الفاتورة"); }
