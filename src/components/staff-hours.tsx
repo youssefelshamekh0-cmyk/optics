@@ -12,12 +12,13 @@ const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency",
 const dayText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { weekday: "short", day: "numeric", month: "short" }).format(new Date(iso));
 const timeText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 const localDay = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-const monthStart = () => { const d = new Date(); return localDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
+// The shop week runs Saturday -> Friday. offset 0 = this week, -1 = last week.
+const weekRange = (offset = 0) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7) + offset * 7); const start = new Date(d); const end = new Date(d); end.setDate(end.getDate() + 6); const today = localDay(new Date()); return { from: localDay(start), to: offset === 0 ? today : localDay(end) }; };
 
 /** Owner-only report of every seller's worked hours, built from their opened/closed shifts. */
 export default function StaffHours({ branches }: { branches: Branch[] }) {
-  const [from, setFrom] = useState(monthStart);
-  const [to, setTo] = useState(() => localDay(new Date()));
+  const [from, setFrom] = useState(() => weekRange(0).from);
+  const [to, setTo] = useState(() => weekRange(0).to);
   const [branchId, setBranchId] = useState("");
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [error, setError] = useState("");
@@ -54,11 +55,12 @@ export default function StaffHours({ branches }: { branches: Branch[] }) {
   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
 
   return <section className="panel operations-panel">
-    <div className="section-heading"><div><p className="eyebrow">من الورديات المفتوحة والمغلقة</p><h2>ساعات عمل الموظفين</h2></div><span className="count-badge">الإجمالي: {hoursLabel(totalMs)}</span></div>
+    <div className="section-heading"><div><p className="eyebrow">أسبوعي: من السبت إلى الجمعة</p><h2>ساعات عمل الموظفين</h2></div><span className="count-badge">الإجمالي: {hoursLabel(totalMs)}</span></div>
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="ops-toolbar">
       <label>من<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
       <label>إلى<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
+      <div className="week-shortcuts"><button type="button" className="row-action" onClick={() => { const w = weekRange(0); setFrom(w.from); setTo(w.to); }}>هذا الأسبوع</button><button type="button" className="row-action" onClick={() => { const w = weekRange(-1); setFrom(w.from); setTo(w.to); }}>الأسبوع الماضي</button></div>
       <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
       <button type="button" className="row-action" onClick={() => void load()} disabled={busy}>{busy ? "جارٍ التحديث…" : "تحديث"}</button>
     </div>

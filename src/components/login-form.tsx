@@ -22,7 +22,7 @@ export default function LoginForm() {
     }
     setError("تعذر تسجيل الدخول. تحقق من رقم الموبايل أو حالة الحساب."); setBusy(false);
   }
-  return <main className="login-wrap"><div className="login-card"><div className="brand-mark">ن</div><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
+  return <main className="login-wrap"><div className="login-card"><img className="brand-logo" src="/icons/icon-192.png" alt="نظرة" width={56} height={56} /><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
     <form onSubmit={submit} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={phoneInput} onChange={(event) => { const value = event.target.value; setPhoneInput(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
     {error && <p className="notice error" role="alert">{error}</p>}
     <div className="secure-note"><span className="dot"/> الجلسة والصلاحيات محمية عبر Supabase</div></div></main>;

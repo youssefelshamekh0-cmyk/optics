@@ -70,14 +70,15 @@ export default function ShiftPanel() {
 
   if (!data || data.owner) return null;
   const account = data.accounts.find((a) => a.id === accountId);
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const monthMs = data.shifts.filter((s) => s.opened_at.slice(0, 7) === monthKey).reduce((sum, s) => sum + durationOf(s, now), 0);
+  // Hours are counted per shop week (Saturday -> Friday), not per month.
+  const weekStartMs = (() => { const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return d.getTime(); })();
+  const weekMs = data.shifts.filter((s) => new Date(s.opened_at).getTime() >= weekStartMs).reduce((sum, s) => sum + durationOf(s, now), 0);
   const history = data.shifts.filter((s) => s.status === "closed").slice(0, 10);
 
   return (
     <section className="panel shift-panel">
       <div className="section-heading"><div><p className="eyebrow">اليومية</p><h2>{open ? "يوم عمل جارٍ" : "لا توجد وردية مفتوحة"}</h2></div>
-        {monthMs > 0 && <span className="count-badge" title="آخر 20 وردية">ساعات هذا الشهر: {hoursLabel(monthMs)}</span>}</div>
+        {weekMs > 0 && <span className="count-badge" title="من يوم السبت">ساعات هذا الأسبوع: {hoursLabel(weekMs)}</span>}</div>
       {error && <p className="notice error" role="alert">{error}</p>}
       {message && <p className="notice success" role="status">{message}</p>}
       {open ? (

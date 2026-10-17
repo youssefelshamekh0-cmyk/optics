@@ -1,0 +1,710 @@
+diff --git a/src/app/api/account/route.ts b/src/app/api/account/route.ts
+new file mode 100644
+index 0000000..98f77c5
+--- /dev/null
++++ b/src/app/api/account/route.ts
+@@ -0,0 +1,62 @@
++import { z } from "zod";
++import { createClient } from "@supabase/supabase-js";
++import { getSupabaseAdmin } from "@/lib/supabase/admin";
++import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
++import { audit } from "@/lib/audit";
++import { currentWeek } from "@/lib/week";
++
++const passwordSchema = z.object({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(8).max(200) });
++
++/** Any signed-in user: own profile, weekly salary and hours (read-only). */
++export async function GET() {
++  const user = await getCurrentUser();
++  if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
++  const admin = getSupabaseAdmin() as any;
++  const week = currentWeek();
++  const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate,branches(name)").eq("user_id", user.id).maybeSingle();
++  if (error) throw error;
++  const base = { name: user.name, phone: user.phone, isOwner: user.roles.includes("super_admin"), week: { start: week.start, end: week.end } };
++  if (!employee || base.isOwner) return Response.json({ ...base, salary: null });
++
++  const [shifts, sales, payroll] = await Promise.all([
++    admin.from("seller_shifts").select("opened_at,closed_at").eq("user_id", user.id).gte("opened_at", week.from).lt("opened_at", week.to),
++    employee.commission_rate > 0 ? admin.from("sales").select("grand_total").eq("created_by", user.id).neq("delivery_status", "cancelled").gte("created_at", week.from).lt("created_at", week.to) : Promise.resolve({ data: [], error: null }),
++    admin.from("payroll_entries").select("id,period_start,period_end,base_salary,commission_amount,deductions,amount_paid,status").eq("employee_id", employee.id).order("period_start", { ascending: false }).limit(8),
++  ]);
++  if (shifts.error || sales.error || payroll.error) throw shifts.error ?? sales.error ?? payroll.error;
++  const now = Date.now();
++  const weekSeconds = Math.round((shifts.data ?? []).reduce((sum: number, s: any) => sum + Math.max(0, ((s.closed_at ? Date.parse(s.closed_at) : now) - Date.parse(s.opened_at)) / 1000), 0));
++  const weekSales = (sales.data ?? []).reduce((sum: number, s: any) => sum + Number(s.grand_total), 0);
++  const rate = Number(employee.commission_rate);
++  return Response.json({
++    ...base,
++    salary: {
++      jobTitle: employee.job_title, branch: employee.branches?.name ?? null,
++      weeklySalary: Number(employee.base_salary), commissionRate: rate,
++      weekSeconds, weekSales: rate > 0 ? weekSales : 0, weekCommission: Math.round(weekSales * rate) / 100,
++      payroll: (payroll.data ?? []).map((p: any) => ({ ...p, base_salary: Number(p.base_salary), commission_amount: Number(p.commission_amount), deductions: Number(p.deductions), amount_paid: Number(p.amount_paid) })),
++    },
++  });
++}
++
++/** Any signed-in user can change their own password after confirming the current one. */
++export async function PATCH(request: Request) {
++  const user = await getCurrentUser();
++  if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
++  if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
++  const parsed = passwordSchema.safeParse(await request.json().catch(() => null));
++  if (!parsed.success) return Response.json({ error: "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف" }, { status: 400 });
++  const { currentPassword, newPassword } = parsed.data;
++  if (newPassword === currentPassword) return Response.json({ error: "كلمة المرور الجديدة مطابقة للحالية" }, { status: 400 });
++  if (!user.phone) return Response.json({ error: "لا يوجد رقم موبايل مرتبط بالحساب" }, { status: 400 });
++
++  // Verify the current password with a throwaway client so the caller's own session cookies are untouched.
++  const verifier = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
++  const { error: verifyError } = await verifier.auth.signInWithPassword({ phone: user.phone, password: currentPassword });
++  if (verifyError) return Response.json({ error: "كلمة المرور الحالية غير صحيحة" }, { status: 400 });
++
++  const { error } = await getSupabaseAdmin().auth.admin.updateUserById(user.id, { password: newPassword });
++  if (error) return Response.json({ error: "تعذر تغيير كلمة المرور" }, { status: 400 });
++  await audit(user.id, "user.password_change", "user", user.id, {});
++  return Response.json({ success: true });
++}
+diff --git a/src/app/api/daily/route.ts b/src/app/api/daily/route.ts
+index 7480e3b..439b427 100644
+--- a/src/app/api/daily/route.ts
++++ b/src/app/api/daily/route.ts
+@@ -30,7 +30,9 @@ export async function GET(request: Request) {
+   const dateParam = params.get("date");
+   const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && !Number.isNaN(Date.parse(dateParam)) ? dateParam : today;
+   const from = cairoMidnight(date).toISOString(), to = cairoMidnight(addDays(date, 1)).toISOString();
+-  const monthFrom = cairoMidnight(`${date.slice(0, 7)}-01`).toISOString();
++  // Staff hours and pay run weekly (Saturday to Friday), so the report covers the week that contains the selected day.
++  const weekStartDate = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 1) % 7));
++  const weekFrom = cairoMidnight(weekStartDate).toISOString(), weekTo = cairoMidnight(addDays(weekStartDate, 7)).toISOString();
+   const admin = getSupabaseAdmin() as any;
+ 
+   const branchQuery = admin.from("branches").select("id,name,code,status").eq("status", "active").order("name");
+@@ -41,7 +43,7 @@ export async function GET(request: Request) {
+   const requested = params.get("branchId");
+   if (requested && requested !== "all" && !allowed.includes(requested)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
+   const branchIds: string[] = requested && requested !== "all" ? [requested] : allowed;
+-  if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], monthHours: [] });
++  if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], weekHours: [], weekStart: weekStartDate });
+ 
+   // Invoices of the day (sellers only see their own).
+   let salesQuery = admin.from("sales").select("id,invoice_number,branch_id,customer_id,created_by,grand_total,delivery_status,created_at").in("branch_id", branchIds).gte("created_at", from).lt("created_at", to).order("created_at", { ascending: false }).limit(500);
+@@ -69,7 +71,7 @@ export async function GET(request: Request) {
+   });
+   const live = invoices.filter((i: any) => i.status !== "cancelled");
+ 
+-  // Shifts of the day (+ still-open ones when looking at today) and month hours.
++  // Shifts of the day (+ still-open ones when looking at today) and the week's hours.
+   let dayShifts = admin.from("seller_shifts").select("id,user_id,branch_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,user_profiles(full_name),branches(name)").in("branch_id", branchIds).gte("opened_at", from).lt("opened_at", to).order("opened_at", { ascending: false });
+   let openShifts = date === today ? admin.from("seller_shifts").select("id,user_id,branch_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,user_profiles(full_name),branches(name)").in("branch_id", branchIds).eq("status", "open") : null;
+   if (!isOwner) { dayShifts = dayShifts.eq("user_id", user.id); if (openShifts) openShifts = openShifts.eq("user_id", user.id); }
+@@ -79,12 +81,12 @@ export async function GET(request: Request) {
+   for (const s of [...(openRes.data ?? []), ...(dayRes.data ?? [])]) shiftMap.set(s.id, s);
+   const shifts = [...shiftMap.values()].sort((a, b) => b.opened_at.localeCompare(a.opened_at)).map((s: any) => ({ id: s.id, user: s.user_profiles?.full_name ?? "—", branch: s.branches?.name ?? "", opened_at: s.opened_at, closed_at: s.closed_at, status: s.status, opening_cash: Number(s.opening_cash), closing_cash: s.closing_cash == null ? null : Number(s.closing_cash), variance: isOwner && s.variance != null ? Number(s.variance) : null }));
+ 
+-  let monthHours: { user_id: string; name: string; seconds: number; shifts: number }[] = [];
++  let weekHours: { user_id: string; name: string; seconds: number; shifts: number }[] = [];
+   if (isOwner) {
+-    const rows = await fetchAll(admin.from("seller_shifts").select("user_id,opened_at,closed_at,user_profiles(full_name)").in("branch_id", branchIds).gte("opened_at", monthFrom).lt("opened_at", cairoMidnight(addDays(date.slice(0, 7) + "-28", 5).slice(0, 7) + "-01").toISOString()));
++    const rows = await fetchAll(admin.from("seller_shifts").select("user_id,opened_at,closed_at,user_profiles(full_name)").in("branch_id", branchIds).gte("opened_at", weekFrom).lt("opened_at", weekTo));
+     const acc = new Map<string, { user_id: string; name: string; seconds: number; shifts: number }>();
+     for (const r of rows) { const end = r.closed_at ? Date.parse(r.closed_at) : Date.now(); const cur = acc.get(r.user_id) ?? { user_id: r.user_id, name: r.user_profiles?.full_name ?? "—", seconds: 0, shifts: 0 }; cur.seconds += Math.max(0, (end - Date.parse(r.opened_at)) / 1000); cur.shifts += 1; acc.set(r.user_id, cur); }
+-    monthHours = [...acc.values()].sort((a, b) => b.seconds - a.seconds).map((x) => ({ ...x, seconds: Math.round(x.seconds) }));
++    weekHours = [...acc.values()].sort((a, b) => b.seconds - a.seconds).map((x) => ({ ...x, seconds: Math.round(x.seconds) }));
+   }
+ 
+   let accounts: any[] = [], expenses: any[] = [], cashIn = 0, cashOut = 0, collected = 0, expensesTotal = 0;
+@@ -111,6 +113,6 @@ export async function GET(request: Request) {
+   return Response.json({
+     role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all",
+     summary: { invoices: live.length, sales: live.reduce((s: number, i: any) => s + i.total, 0), collected, due: live.reduce((s: number, i: any) => s + i.due, 0), expenses: expensesTotal, cashIn, cashOut },
+-    invoices, accounts, expenses, shifts, monthHours,
++    invoices, accounts, expenses, shifts, weekHours, weekStart: weekStartDate,
+   });
+ }
+diff --git a/src/app/api/lens-supplies/orders/route.ts b/src/app/api/lens-supplies/orders/route.ts
+new file mode 100644
+index 0000000..7a60281
+--- /dev/null
++++ b/src/app/api/lens-supplies/orders/route.ts
+@@ -0,0 +1,101 @@
++import { z } from "zod";
++import { getSupabaseAdmin } from "@/lib/supabase/admin";
++import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
++import { audit } from "@/lib/audit";
++
++async function ownerOnly() {
++  const user = await getCurrentUser();
++  if (!user) return { user: null, response: Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 }) };
++  if (!user.roles.includes("super_admin")) return { user, response: Response.json({ error: "هذه الشاشة متاحة لمالك البراند" }, { status: 403 }) };
++  return { user, response: null };
++}
++
++const bodySchema = z.object({
++  branchId: z.string().uuid(), company: z.string().trim().min(1).max(120),
++  invoiceNumber: z.string().trim().min(1).max(100), supplierName: z.string().trim().min(2).max(160),
++  supplierPhone: z.string().trim().max(40).default(""), receivedAt: z.string().datetime(),
++  items: z.array(z.object({ saleItemId: z.string().uuid(), unitCost: z.number().finite().min(0).max(10000000) })).min(1).max(200),
++});
++
++/** Ordered (not yet received) prescription lenses of a branch, grouped by lens company. */
++export async function GET(request: Request) {
++  const { response } = await ownerOnly();
++  if (response) return response;
++  const params = new URL(request.url).searchParams;
++  const branchId = z.string().uuid().safeParse(params.get("branchId") ?? "");
++  if (!branchId.success) return Response.json({ error: "حدد الفرع" }, { status: 400 });
++  const company = params.get("company")?.trim() ?? "";
++  const admin = getSupabaseAdmin() as any;
++  const { data, error } = await admin.from("sale_items")
++    .select("id,sale_id,item_name,quantity,technical_details,sales!inner(invoice_number,branch_id,delivery_status,created_at,customers(full_name,phone))")
++    .eq("item_kind", "prescription_lens").is("lens_received_at", null)
++    .eq("sales.branch_id", branchId.data).neq("sales.delivery_status", "cancelled")
++    .limit(1000);
++  if (error) throw error;
++  const rows = (data ?? []).map((row: any) => {
++    const d = row.technical_details ?? {};
++    return {
++      id: row.id, invoiceNumber: row.sales?.invoice_number, orderedAt: row.sales?.created_at, deliveryStatus: row.sales?.delivery_status,
++      customer: row.sales?.customers?.full_name ?? "—", phone: row.sales?.customers?.phone ?? "",
++      company: String(d.company ?? "غير محدد"), lensTypeName: String(d.lensTypeName ?? row.item_name), options: String(d.options ?? ""),
++      right: d.right ? { sphere: d.right.sphere, cylinder: d.right.cylinder, axis: d.right.axis } : null,
++      left: d.left ? { sphere: d.left.sphere, cylinder: d.left.cylinder, axis: d.left.axis } : null,
++    };
++  });
++  const counts = new Map<string, number>();
++  for (const r of rows) counts.set(r.company, (counts.get(r.company) ?? 0) + 1);
++  const companies = [...counts.entries()].map(([name, pending]) => ({ name, pending })).sort((a, b) => a.name.localeCompare(b.name, "ar"));
++  const orders = company ? rows.filter((r: any) => r.company === company).sort((a: any, b: any) => String(a.orderedAt).localeCompare(String(b.orderedAt))) : [];
++  return Response.json({ companies, orders });
++}
++
++/** Confirms which ordered lenses arrived and records the supplier invoice. */
++export async function POST(request: Request) {
++  const { user, response } = await ownerOnly();
++  if (response) return response;
++  if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
++  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
++  if (!parsed.success) return Response.json({ error: "راجع بيانات الفاتورة والعدسات المستلمة" }, { status: 400 });
++  const input = parsed.data;
++  const ids = input.items.map((i) => i.saleItemId);
++  if (new Set(ids).size !== ids.length) return Response.json({ error: "عدسة مكررة في الفاتورة" }, { status: 400 });
++  const admin = getSupabaseAdmin() as any;
++
++  const { data: lines, error } = await admin.from("sale_items").select("id,item_name,technical_details").in("id", ids);
++  if (error) throw error;
++  if ((lines ?? []).length !== ids.length) return Response.json({ error: "إحدى العدسات غير موجودة" }, { status: 400 });
++  if ((lines ?? []).some((l: any) => String(l.technical_details?.company ?? "") !== input.company)) return Response.json({ error: "كل العدسات في الفاتورة يجب أن تكون من نفس الشركة" }, { status: 400 });
++
++  const costById = new Map(input.items.map((i) => [i.saleItemId, i.unitCost]));
++  // The supply invoice keeps a catalogue product per lens type (created once, reused afterwards).
++  const productByName = new Map<string, string>();
++  const rpcItems: { saleItemId: string; productId: string; unitCost: number }[] = [];
++  for (const line of lines ?? []) {
++    const d = line.technical_details ?? {};
++    const name = `${input.company} ${d.lensTypeName ?? line.item_name}`.trim();
++    let productId = productByName.get(name.toLowerCase());
++    if (!productId) {
++      const lookup = admin.from("products").select("id").eq("active", true).in("category", ["lens", "contact_lens"]);
++      const existing = await (/[%_*\\]/.test(name) ? lookup.eq("name", name) : lookup.ilike("name", name)).limit(1).maybeSingle();
++      if (existing.error) throw existing.error;
++      if (existing.data) productId = existing.data.id;
++      else {
++        const created = await admin.from("products").insert({ name, category: "lens", created_by: user!.id }).select("id").single();
++        if (created.error) throw created.error;
++        productId = created.data.id as string;
++      }
++      productByName.set(name.toLowerCase(), productId!);
++    }
++    rpcItems.push({ saleItemId: line.id, productId: productId!, unitCost: Math.round((costById.get(line.id) ?? 0) * 100) / 100 });
++  }
++
++  const { data, error: rpcError } = await admin.rpc("receive_ordered_lenses", {
++    p_invoice_number: input.invoiceNumber, p_supplier_name: input.supplierName, p_supplier_phone: input.supplierPhone,
++    p_branch_id: input.branchId, p_received_at: input.receivedAt, p_items: rpcItems, p_created_by: user!.id,
++  });
++  if (rpcError?.code === "23505") return Response.json({ error: "رقم فاتورة المورد مسجل من قبل" }, { status: 409 });
++  if (rpcError?.message?.includes("lens item unavailable")) return Response.json({ error: "إحدى العدسات تم استلامها بالفعل أو فاتورتها ملغاة. حدّث القائمة وحاول مرة أخرى." }, { status: 409 });
++  if (rpcError) throw rpcError;
++  await audit(user!.id, "lens_supply.receive_orders", "lens_supply", data, { branchId: input.branchId, company: input.company, invoiceNumber: input.invoiceNumber, lenses: rpcItems.length });
++  return Response.json({ supplyId: data }, { status: 201 });
++}
+diff --git a/src/app/api/operations/route.ts b/src/app/api/operations/route.ts
+index 28fdac6..7efaaf0 100644
+--- a/src/app/api/operations/route.ts
++++ b/src/app/api/operations/route.ts
+@@ -122,7 +122,9 @@ export async function POST(request:Request){
+    const q=parsed.data.id?admin.from("employees").update(row).eq("id",parsed.data.id).select("id").single():admin.from("employees").insert(row).select("id").single(); const {data,error}=await q;if(error)throw error;entityId=data.id;
+  }else if(action==="payrollCreate"){
+    if(parsed.data.periodEnd<parsed.data.periodStart)return Response.json({error:"نهاية الفترة قبل بدايتها"},{status:400});
++   if((Date.parse(parsed.data.periodEnd)-Date.parse(parsed.data.periodStart))/86400000>6)return Response.json({error:"كشف الراتب أسبوعي: الفترة يجب ألا تزيد عن 7 أيام"},{status:400});
+    const {data:employee,error:e}=await admin.from("employees").select("id,branch_id,user_id,base_salary,commission_rate").eq("id",parsed.data.employeeId).maybeSingle();if(e)throw e;if(!employee)return Response.json({error:"الموظف غير موجود"},{status:404});if(!branchAllowed(user!,employee.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
++   const overlap=await admin.from("payroll_entries").select("id").eq("employee_id",employee.id).lte("period_start",parsed.data.periodEnd).gte("period_end",parsed.data.periodStart).limit(1);if(overlap.error)throw overlap.error;if(overlap.data?.length)return Response.json({error:"يوجد كشف راتب لهذا الموظف يتداخل مع نفس الأسبوع"},{status:409});
+    let commission=0;if(employee.user_id&&Number(employee.commission_rate)>0){const sales=await admin.from("sales").select("grand_total").eq("created_by",employee.user_id).eq("branch_id",employee.branch_id).gte("created_at",parsed.data.periodStart).lte("created_at",parsed.data.periodEnd+"T23:59:59.999Z").neq("delivery_status","cancelled");if(sales.error)throw sales.error;commission=(sales.data??[]).reduce((s:number,x:any)=>s+Number(x.grand_total),0)*Number(employee.commission_rate)/100;}
+    const {data,error}=await admin.from("payroll_entries").insert({employee_id:employee.id,period_start:parsed.data.periodStart,period_end:parsed.data.periodEnd,base_salary:employee.base_salary,commission_amount:commission,deductions:parsed.data.deductions,created_by:user!.id,notes:parsed.data.notes||null}).select("id").single();if(error)throw error;entityId=data.id;
+  }else if(action==="payrollPay"){
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 7a39650..93203dc 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -41,3 +41,15 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
+ .daily-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.daily-controls label{display:grid;gap:4px;font-size:10px;color:var(--muted)}.daily-controls select,.daily-date input{min-height:36px;border:1px solid #dfe6e1;border-radius:9px;padding:5px 10px;background:#fbfcfb;font-size:11px}.daily-date{display:flex;gap:6px;align-items:center}
+ @media(max-width:860px){.shift-running{grid-template-columns:1fr}.lens-new{grid-template-columns:1fr}.shift-timer strong{font-size:32px}.daily-controls{width:100%}.daily-controls label{flex:1 1 140px}}
+ .install-popup{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;width:min(calc(100% - 24px),430px);display:flex;align-items:center;gap:11px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:11px 13px;box-shadow:0 14px 40px #1e292c33}.install-popup-icon{width:38px;height:38px;flex:none;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:19px;font-weight:700}.install-popup-text{flex:1;min-width:0}.install-popup-text strong{display:block;font-size:12px}.install-popup-text small{display:block;color:var(--muted);font-size:10px;margin-top:3px;line-height:1.6}.install-popup-btn{flex:none;height:36px}.install-popup-close{flex:none;padding:6px;font-size:13px}
++
++/* Logo uses the app icon */
++.brand-logo{width:56px;height:56px;border-radius:15px;display:block;box-shadow:0 7px 18px #27685f30;object-fit:cover}.brand-logo.small{width:38px;height:38px;border-radius:12px}.login-card .brand-logo{margin-bottom:24px}
++/* Branch accounts toggle */
++.accounts-toggle{margin:14px 0 10px}
++/* My account */
++.account-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.account-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.account-kpis article{border:1px solid var(--line);border-radius:12px;padding:13px 14px;display:grid;gap:4px}.account-kpis span{font-size:10px;color:var(--muted)}.account-kpis strong{font-size:19px;color:var(--green-deep)}.account-kpis small{font-size:9px;color:#9ca8a4}
++@media(max-width:800px){.account-grid{grid-template-columns:1fr}.account-kpis{grid-template-columns:1fr}}
++/* Weekly range shortcuts and lens order receiving */
++.week-shortcuts{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.mode-switch{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}.mode-switch button{border:1px solid var(--line);background:white;border-radius:20px;padding:8px 14px;font-size:11px;color:var(--ink)}.mode-switch button.on{background:var(--green);color:white;border-color:var(--green)}
++.order-lens-list{display:grid;gap:8px;margin:10px 0 14px}.order-lens{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fbfcfb}.order-lens.on{border-color:var(--green);background:var(--mint)}.order-lens input[type=checkbox]{accent-color:var(--green);width:16px;height:16px}.order-lens small{display:block;color:var(--muted);font-size:10px;margin-top:3px;direction:rtl;text-align:right}.order-lens .cost{width:110px;height:34px;border:1px solid #e2e8e3;border-radius:8px;padding:0 9px;font-size:11px}
++@media(max-width:560px){.order-lens{grid-template-columns:auto 1fr}.order-lens .cost{grid-column:1/-1;width:100%}}
+diff --git a/src/components/account-section.tsx b/src/components/account-section.tsx
+new file mode 100644
+index 0000000..dc5c9c1
+--- /dev/null
++++ b/src/components/account-section.tsx
+@@ -0,0 +1,68 @@
++"use client";
++import { FormEvent, useCallback, useEffect, useState } from "react";
++import { hoursLabel } from "@/components/shift-panel";
++
++type Payroll = { id: string; period_start: string; period_end: string; base_salary: number; commission_amount: number; deductions: number; amount_paid: number; status: string };
++type Account = {
++  name: string; phone: string; isOwner: boolean; week: { start: string; end: string };
++  salary: null | { jobTitle: string; branch: string | null; weeklySalary: number; commissionRate: number; weekSeconds: number; weekSales: number; weekCommission: number; payroll: Payroll[] };
++};
++const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
++const dayText = (d: string) => new Intl.DateTimeFormat("ar-EG", { day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
++
++/** Available to every user: change own password and (for staff) see the weekly salary. */
++export default function AccountSection({ isOwner }: { isOwner: boolean }) {
++  const [data, setData] = useState<Account | null>(null);
++  const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
++  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
++
++  const load = useCallback(async () => {
++    try {
++      const r = await fetch("/api/account", { cache: "no-store" });
++      const j = await r.json().catch(() => ({}));
++      if (!r.ok) throw new Error(j.error ?? "تعذر تحميل بيانات الحساب");
++      setData(j);
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل بيانات الحساب"); }
++  }, []);
++  useEffect(() => { void load(); }, [load]);
++
++  async function changePassword(event: FormEvent) {
++    event.preventDefault(); setError(""); setNotice("");
++    if (form.newPassword.length < 8) { setError("كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف"); return; }
++    if (form.newPassword !== form.confirm) { setError("تأكيد كلمة المرور غير مطابق"); return; }
++    setBusy(true);
++    try {
++      const r = await fetch("/api/account", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }) });
++      const j = await r.json().catch(() => ({}));
++      if (!r.ok) throw new Error(j.error ?? "تعذر تغيير كلمة المرور");
++      setForm({ currentPassword: "", newPassword: "", confirm: "" }); setNotice("تم تغيير كلمة المرور. استخدم الجديدة في تسجيل الدخول القادم.");
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تغيير كلمة المرور"); } finally { setBusy(false); }
++  }
++
++  const s = data?.salary;
++  return <div className="account-grid">
++    <section className="panel form-panel"><div className="section-heading"><div><p className="eyebrow">الأمان</p><h2>تغيير كلمة المرور</h2></div><span className="soft-icon">🔒</span></div>
++      <form className="form-grid" onSubmit={changePassword}>
++        <label className="wide">كلمة المرور الحالية<input type="password" autoComplete="current-password" required value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} /></label>
++        <label>كلمة المرور الجديدة<input type="password" autoComplete="new-password" required minLength={8} value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} /></label>
++        <label>تأكيد كلمة المرور<input type="password" autoComplete="new-password" required minLength={8} value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} /></label>
++        <p className="wide footnote">8 أحرف على الأقل. كلمة المرور المبدئية هي رقم موبايلك بدون الصفر الأول، ويُفضّل تغييرها.</p>
++        {error && <div className="wide notice error" role="alert">{error}</div>}{notice && <div className="wide notice success" role="status">{notice}</div>}
++        <button className="primary" disabled={busy}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
++      </form></section>
++    {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2></div>{s && <span className="count-badge">{s.jobTitle}{s.branch ? ` · ${s.branch}` : ""}</span>}</div>
++      {!data ? <p className="footnote">جارٍ التحميل…</p> : !s ? <p className="footnote">لم يُسجَّل لك مرتب بعد. اطلب من المالك ربط حسابك بسجل موظف.</p> : <>
++        <div className="account-kpis">
++          <article><span>المرتب الأسبوعي</span><strong>{money(s.weeklySalary)}</strong><small>يُصرف كل أسبوع</small></article>
++          <article><span>ساعات هذا الأسبوع</span><strong>{hoursLabel(s.weekSeconds * 1000)}</strong><small>من الورديات المسجلة</small></article>
++          <article><span>عمولة هذا الأسبوع</span><strong>{money(s.weekCommission)}</strong><small>{s.commissionRate > 0 ? `${s.commissionRate}% من ${money(s.weekSales)}` : "لا توجد عمولة"}</small></article>
++        </div>
++        <h3 className="ops-subtitle">كشوف الرواتب السابقة</h3>
++        <div className="table-wrap"><table><thead><tr><th>الأسبوع</th><th>الأساسي</th><th>العمولة</th><th>الخصم</th><th>المصروف</th><th>الحالة</th></tr></thead><tbody>
++          {s.payroll.map((p) => <tr key={p.id}><td>{dayText(p.period_start)} – {dayText(p.period_end)}</td><td>{money(p.base_salary)}</td><td>{money(p.commission_amount)}</td><td>{money(p.deductions)}</td><td>{money(p.amount_paid)}</td><td>{p.status === "pending" ? "قيد الصرف" : "تم الصرف"}</td></tr>)}
++          {s.payroll.length === 0 && <tr><td colSpan={6} className="table-empty">لا توجد كشوف رواتب بعد.</td></tr>}
++        </tbody></table></div>
++        <p className="footnote">العمولة المعروضة تقديرية حتى يُعتمد كشف الأسبوع من المالك.</p></>}
++    </section>}
++  </div>;
++}
+diff --git a/src/components/catalog-sections.tsx b/src/components/catalog-sections.tsx
+index d335001..7d02656 100644
+--- a/src/components/catalog-sections.tsx
++++ b/src/components/catalog-sections.tsx
+@@ -104,7 +104,7 @@ type Supply = { id: string; invoice_number: string; received_at: string; total_c
+ type RegisteredLens = { id: string; name: string; category: string; company: string };
+ type SupplyLine = { key: string; productId?: string; newName?: string; category?: string; name: string; quantity: string; unitCost: string };
+ const localInput = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+-export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
++function ManualLensSupply({ branches }: { branches: Branch[] }) {
+   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
+   const [branchId, setBranchId] = useState("");
+   const [products, setProducts] = useState<Product[]>([]);
+@@ -206,3 +206,88 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+     <div className="table-wrap"><table><thead><tr><th>فاتورة المورد</th><th>المورد</th><th>تاريخ الاستلام</th><th>الأصناف</th><th>الإجمالي</th></tr></thead><tbody>{supplies.map((s) => <tr key={s.id}><td>{s.invoice_number}</td><td>{s.supplier?.name ?? "—"}</td><td>{new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(s.received_at))}</td><td>{s.items.map((i) => `${i.product?.name ?? "صنف"} × ${i.quantity} (${money(Number(i.unit_cost))})`).join("، ")}</td><td>{money(Number(s.total_cost))}</td></tr>)}{supplies.length === 0 && <tr><td colSpan={5} className="table-empty">لا توجد توريدات مسجلة لهذا الفرع.</td></tr>}</tbody></table></div>
+   </section>;
+ }
++
++
++type OrderedLens = { id: string; invoiceNumber: number; orderedAt: string; deliveryStatus: string; customer: string; phone: string; company: string; lensTypeName: string; options: string; right: { sphere: number; cylinder: number; axis: string } | null; left: { sphere: number; cylinder: number; axis: string } | null };
++const rxText = (e: OrderedLens["right"]) => (e ? `${e.sphere} / ${e.cylinder}${e.axis ? ` × ${e.axis}` : ""}` : "—");
++
++/** Pick a lens company, see the lenses customers ordered from it, tick the ones that arrived and complete the supplier invoice. */
++function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
++  const activeBranches = branches.filter((b) => b.status === "ACTIVE");
++  const [branchId, setBranchId] = useState("");
++  const [companies, setCompanies] = useState<{ name: string; pending: number }[]>([]);
++  const [company, setCompany] = useState("");
++  const [orders, setOrders] = useState<OrderedLens[]>([]);
++  const [costs, setCosts] = useState<Record<string, string>>({});
++  const [bulkCost, setBulkCost] = useState("");
++  const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput() });
++  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
++  useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
++
++  const load = useCallback(async (selected: string) => {
++    if (!branchId) return;
++    try {
++      const result = await requestJson(`/api/lens-supplies/orders?branchId=${branchId}&company=${encodeURIComponent(selected)}`);
++      setCompanies(result.companies ?? []); setOrders(result.orders ?? []);
++      setCosts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => (result.orders ?? []).some((o: OrderedLens) => o.id === id))));
++      setError("");
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الطلبات"); }
++  }, [branchId]);
++  useEffect(() => { void load(company); }, [load, company]);
++
++  const picked = Object.keys(costs);
++  const total = picked.reduce((sum, id) => sum + (Number(costs[id]) || 0), 0);
++  function toggle(id: string) { setCosts((current) => { if (id in current) { const { [id]: _removed, ...rest } = current; return rest; } return { ...current, [id]: "" }; }); }
++  function pickCompany(name: string) { setCompany(name); setCosts({}); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
++  function selectAll() { setCosts(Object.fromEntries(orders.map((o) => [o.id, costs[o.id] ?? ""]))); }
++  function applyBulk() { if (bulkCost === "") return; setCosts((current) => Object.fromEntries(Object.keys(current).map((id) => [id, bulkCost]))); }
++
++  async function save(event: FormEvent) {
++    event.preventDefault(); setError(""); setNotice("");
++    if (!picked.length) { setError("حدد العدسات التي وصلت أولاً"); return; }
++    if (picked.some((id) => costs[id] === "" || Number(costs[id]) < 0)) { setError("اكتب سعر كل عدسة وصلت قبل التأكيد"); return; }
++    setBusy(true);
++    try {
++      await requestJson("/api/lens-supplies/orders", { method: "POST", body: JSON.stringify({ ...form, receivedAt: new Date(form.receivedAt).toISOString(), branchId, company, items: picked.map((id) => ({ saleItemId: id, unitCost: Number(costs[id]) })) }) });
++      setNotice(`تم تسجيل فاتورة التوريد وتعليم ${picked.length} عدسة كمستلمة`); setCosts({}); setBulkCost(""); setForm((f) => ({ ...f, invoiceNumber: "", receivedAt: localInput() })); await load(company);
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل التوريد"); await load(company); } finally { setBusy(false); }
++  }
++
++  return <>
++    <div className="catalog-toolbar"><label>الفرع المستلم<select value={branchId} onChange={(e) => { setBranchId(e.target.value); setCompany(""); setCosts({}); setOrders([]); }}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
++      <label>الشركة<select value={company} onChange={(e) => pickCompany(e.target.value)}><option value="">اختر الشركة…</option>{companies.map((c) => <option key={c.name} value={c.name}>{c.name} — {c.pending} مطلوبة</option>)}</select></label></div>
++    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
++    {companies.length === 0 && !error && <p className="footnote">لا توجد عدسات مطلوبة من العملاء بانتظار الاستلام في هذا الفرع.</p>}
++    {company && <form className="catalog-form" onSubmit={save}>
++      <div className="sale-subheading"><strong>العدسات المطلوبة من {company} ({orders.length})</strong><span className="footnote">علّم العدسات التي وصلت فقط، وسيبقى الباقي مطلوبًا.</span></div>
++      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setCosts({})} disabled={picked.length === 0}>إلغاء التحديد</button></div>
++      <div className="order-lens-list">{orders.map((o) => { const on = o.id in costs; return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
++        <input type="checkbox" aria-label={`وصلت عدسة فاتورة ${o.invoiceNumber}`} checked={on} onChange={() => toggle(o.id)} />
++        <label><strong>{o.lensTypeName}{o.options ? ` — ${o.options}` : ""}</strong><small>فاتورة #{o.invoiceNumber} · {o.customer}{o.phone ? ` · ${o.phone}` : ""} · {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(o.orderedAt))}</small><small>يمين: {rxText(o.right)} · يسار: {rxText(o.left)}</small></label>
++        {on && <input className="cost" type="number" min="0" step="0.01" required placeholder="سعر الزوج" aria-label="سعر الزوج" value={costs[o.id]} onChange={(e) => setCosts({ ...costs, [o.id]: e.target.value })} />}</div>; })}
++        {orders.length === 0 && <span className="footnote">لا توجد عدسات مطلوبة من هذه الشركة.</span>}</div>
++      {picked.length > 0 && <>
++        <div className="supply-bulk"><label>سعر موحد للمحدد<input type="number" min="0" step="0.01" value={bulkCost} onChange={(e) => setBulkCost(e.target.value)} placeholder="اختياري" /></label><button type="button" className="row-action" onClick={applyBulk} disabled={bulkCost === ""}>تطبيق</button></div>
++        <div className="catalog-fields">
++          <label>المورد<input required minLength={2} value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
++          <label>رقم هاتف المورد<input type="tel" value={form.supplierPhone} onChange={(e) => setForm({ ...form, supplierPhone: e.target.value })} /></label>
++          <label>رقم فاتورة المورد<input required value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></label>
++          <label>تاريخ الاستلام<input required type="datetime-local" value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} /></label>
++        </div>
++        <p><strong>إجمالي الفاتورة ({picked.length} عدسة): {money(total)}</strong></p>
++        <button className="primary" disabled={busy}>{busy ? "جارٍ التسجيل…" : "إتمام فاتورة التوريد"}</button>
++        <p className="footnote">العدسات المطلوبة لعملاء محددين لا تدخل مخزون الفرع؛ تُسجَّل فقط في فاتورة المورد وتُعلَّم كمستلمة.</p></>}
++    </form>}
++  </>;
++}
++
++export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
++  const [mode, setMode] = useState<"orders" | "stock">("orders");
++  return <>
++    <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">استلام العدسات من الشركات</p><h2>توريد العدسات</h2></div></div>
++      <div className="mode-switch" role="tablist"><button type="button" role="tab" aria-selected={mode === "orders"} className={mode === "orders" ? "on" : ""} onClick={() => setMode("orders")}>طلبات العملاء من الشركة</button><button type="button" role="tab" aria-selected={mode === "stock"} className={mode === "stock" ? "on" : ""} onClick={() => setMode("stock")}>توريد مخزون يدوي</button></div>
++      {mode === "orders" && <OrderedLensReceiving branches={branches} />}
++    </section>
++    {mode === "stock" && <ManualLensSupply branches={branches} />}
++  </>;
++}
+diff --git a/src/components/daily-overview.tsx b/src/components/daily-overview.tsx
+index a5e0ab4..9557a54 100644
+--- a/src/components/daily-overview.tsx
++++ b/src/components/daily-overview.tsx
+@@ -10,7 +10,7 @@ type Daily = {
+   accounts: { id: string; name: string; branch: string; payment_method: string; balance: number; in_today: number; out_today: number }[];
+   expenses: { id: string; branch: string; description: string; category: string; amount: number }[];
+   shifts: { id: string; user: string; branch: string; opened_at: string; closed_at: string | null; status: "open" | "closed"; opening_cash: number; closing_cash: number | null; variance: number | null }[];
+-  monthHours: { user_id: string; name: string; seconds: number; shifts: number }[];
++  weekHours: { user_id: string; name: string; seconds: number; shifts: number }[]; weekStart: string;
+ };
+ const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
+ const statusLabel: Record<string, string> = { pending: "جديد", processing: "قيد التجهيز", ready: "جاهز", delivered: "تم التسليم", cancelled: "ملغي" };
+@@ -25,6 +25,7 @@ export default function DailyOverview() {
+   const [error, setError] = useState("");
+   const [loading, setLoading] = useState(false);
+   const [now, setNow] = useState(() => Date.now());
++  const [showAccounts, setShowAccounts] = useState(false);
+ 
+   const load = useCallback(async (quiet = false) => {
+     if (!quiet) setLoading(true);
+@@ -76,8 +77,8 @@ export default function DailyOverview() {
+       </tbody></table></div>
+ 
+       {owner && <>
+-        <h3 className="ops-subtitle">حسابات الفرع (الخزن وطرق الدفع)</h3>
+-        {data.accounts.length ? <div className="ops-account-grid">{data.accounts.map((a) => <article className="ops-account" key={a.id}><small>{a.branch} · {methodLabel[a.payment_method] ?? a.payment_method}</small><strong>{a.name}</strong><b>{money(a.balance)}</b><small>اليوم: ↓ {money(a.in_today)} · ↑ {money(a.out_today)}</small></article>)}</div> : <p className="footnote">لا توجد خزن نشطة لهذا الاختيار.</p>}
++        <button type="button" className="row-action accounts-toggle" aria-expanded={showAccounts} onClick={() => setShowAccounts((v) => !v)}>{showAccounts ? "إخفاء حسابات الفرع ▴" : "حسابات الفرع (الخزن وطرق الدفع) ▾"}</button>
++        {showAccounts && (data.accounts.length ? <div className="ops-account-grid">{data.accounts.map((a) => <article className="ops-account" key={a.id}><small>{a.branch} · {methodLabel[a.payment_method] ?? a.payment_method}</small><strong>{a.name}</strong><b>{money(a.balance)}</b><small>اليوم: ↓ {money(a.in_today)} · ↑ {money(a.out_today)}</small></article>)}</div> : <p className="footnote">لا توجد خزن نشطة لهذا الاختيار.</p>)}
+         {data.expenses.length > 0 && <><h3 className="ops-subtitle">مصروفات اليوم</h3><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>البيان</th><th>البند</th><th>القيمة</th></tr></thead><tbody>{data.expenses.map((x) => <tr key={x.id}><td>{x.branch}</td><td>{x.description}</td><td>{x.category}</td><td>{money(x.amount)}</td></tr>)}</tbody></table></div></>}
+       </>}
+ 
+@@ -87,7 +88,7 @@ export default function DailyOverview() {
+         {data.shifts.length === 0 && <tr><td colSpan={owner ? 8 : 7} className="table-empty">لا توجد ورديات في هذا اليوم.</td></tr>}
+       </tbody></table></div>
+ 
+-      {owner && data.monthHours.length > 0 && <><h3 className="ops-subtitle">إجمالي ساعات العمل هذا الشهر</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>عدد الورديات</th><th>إجمالي الساعات</th></tr></thead><tbody>{data.monthHours.map((m) => <tr key={m.user_id}><td>{m.name}</td><td>{m.shifts}</td><td><strong>{hoursLabel(m.seconds * 1000)}</strong></td></tr>)}</tbody></table></div></>}
++      {owner && data.weekHours.length > 0 && <><h3 className="ops-subtitle">إجمالي ساعات العمل هذا الأسبوع (من {new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "long" }).format(new Date(`${data.weekStart}T12:00:00Z`))})</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>عدد الورديات</th><th>إجمالي الساعات</th></tr></thead><tbody>{data.weekHours.map((m) => <tr key={m.user_id}><td>{m.name}</td><td>{m.shifts}</td><td><strong>{hoursLabel(m.seconds * 1000)}</strong></td></tr>)}</tbody></table></div></>}
+     </section>
+   );
+ }
+diff --git a/src/components/login-form.tsx b/src/components/login-form.tsx
+index 47eca06..18695f5 100644
+--- a/src/components/login-form.tsx
++++ b/src/components/login-form.tsx
+@@ -22,7 +22,7 @@ export default function LoginForm() {
+     }
+     setError("تعذر تسجيل الدخول. تحقق من رقم الموبايل أو حالة الحساب."); setBusy(false);
+   }
+-  return <main className="login-wrap"><div className="login-card"><div className="brand-mark">ن</div><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
++  return <main className="login-wrap"><div className="login-card"><img className="brand-logo" src="/icons/icon-192.png" alt="نظرة" width={56} height={56} /><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
+     <form onSubmit={submit} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={phoneInput} onChange={(event) => { const value = event.target.value; setPhoneInput(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
+     {error && <p className="notice error" role="alert">{error}</p>}
+     <div className="secure-note"><span className="dot"/> الجلسة والصلاحيات محمية عبر Supabase</div></div></main>;
+diff --git a/src/components/operations-section.tsx b/src/components/operations-section.tsx
+index f2b1688..484d490 100644
+--- a/src/components/operations-section.tsx
++++ b/src/components/operations-section.tsx
+@@ -11,7 +11,7 @@ export default function OperationsSection({module,branches,branchIds,isOwner}:{m
+  const [adjust,setAdjust]=useState({productId:"",delta:"",reason:""});const [transfer,setTransfer]=useState({destinationBranchId:"",productId:"",quantity:"1",reason:""});
+  const [purchase,setPurchase]=useState({invoiceNumber:"",supplierName:"",supplierPhone:"",productId:"",quantity:"1",unitCost:"",paidAmount:"0",cashAccountId:""});
+  const [cash,setCash]=useState({name:"",accountType:"cash",paymentMethod:"cash",openingBalance:"0"});const [expense,setExpense]=useState({description:"",category:"تشغيل",amount:"",cashAccountId:""});
+- const [employee,setEmployee]=useState({name:"",phone:"",jobTitle:"بائع",baseSalary:"0",commissionRate:"0",userId:""});const [payroll,setPayroll]=useState({employeeId:"",periodStart:new Date().toISOString().slice(0,7)+"-01",periodEnd:new Date().toISOString().slice(0,10),deductions:"0",payrollId:"",cashAccountId:"",amount:"",notes:""});
++ const [employee,setEmployee]=useState({name:"",phone:"",jobTitle:"بائع",baseSalary:"0",commissionRate:"0",userId:""});const [payroll,setPayroll]=useState({employeeId:"",periodStart:(()=>{const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()-((d.getDay()+1)%7));return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)})(),periodEnd:(()=>{const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()-((d.getDay()+1)%7)+6);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)})(),deductions:"0",payrollId:"",cashAccountId:"",amount:"",notes:""});
+  const refresh=useCallback(async()=>{setError("");try{const result=await api(`/api/operations?module=${module}${branchId?`&branchId=${encodeURIComponent(branchId)}`:""}`);setData(result)}catch(e){setError(e instanceof Error?e.message:"تعذر تحميل البيانات")}},[module,branchId]);
+  useEffect(()=>{if(!branchId&&available.length)setBranchId(available[0].id)},[available,branchId]);useEffect(()=>{void refresh()},[refresh]);
+  const products=data.products??[];const accounts=data.accounts??[];const employees=data.employees??[];
+@@ -24,6 +24,6 @@ export default function OperationsSection({module,branches,branchIds,isOwner}:{m
+  {module==="inventory"&&<><div className="ops-forms"><form className="ops-form" onSubmit={e=>void submit(e,{action:"adjust",branchId,productId:adjust.productId,delta:Number(adjust.delta),reason:adjust.reason})}><h3>تسوية جرد أو تالف</h3><label>الصنف<select required value={adjust.productId} onChange={e=>setAdjust({...adjust,productId:e.target.value})}><option value="">اختر صنفًا</option>{products.map((p:any)=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><label>فرق الكمية (+ إضافة / − خصم)<input type="number" required value={adjust.delta} onChange={e=>setAdjust({...adjust,delta:e.target.value})}/></label><label>السبب<input required value={adjust.reason} onChange={e=>setAdjust({...adjust,reason:e.target.value})}/></label><button className="primary" disabled={busy}>حفظ التسوية</button></form><form className="ops-form" onSubmit={e=>void submit(e,{action:"transfer",sourceBranchId:branchId,destinationBranchId:transfer.destinationBranchId,productId:transfer.productId,quantity:Number(transfer.quantity),reason:transfer.reason})}><h3>تحويل بين الفروع</h3><label>إلى فرع<select required value={transfer.destinationBranchId} onChange={e=>setTransfer({...transfer,destinationBranchId:e.target.value})}><option value="">اختر فرعًا</option>{available.filter(b=>b.id!==branchId).map(b=><option value={b.id} key={b.id}>{b.name}</option>)}</select></label><label>الصنف<select required value={transfer.productId} onChange={e=>setTransfer({...transfer,productId:e.target.value})}><option value="">اختر صنفًا</option>{products.map((p:any)=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><label>الكمية<input type="number" min="1" required value={transfer.quantity} onChange={e=>setTransfer({...transfer,quantity:e.target.value})}/></label><label>ملاحظة<input value={transfer.reason} onChange={e=>setTransfer({...transfer,reason:e.target.value})}/></label><button className="primary" disabled={busy||!available.some(b=>b.id!==branchId)}>تسجيل التحويل</button></form></div><h3 className="ops-subtitle">الأرصدة الحالية</h3><div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>التكلفة</th><th>سعر البيع المرجعي</th></tr></thead><tbody>{(data.stock??[]).map((x:any)=><tr key={x.product_id}><td>{x.products?.name}<small>{x.products?.sku}</small></td><td>{x.quantity}</td><td>{money(Number(x.cost_price))}</td><td>{money(Number(x.reference_price))}</td></tr>)}</tbody></table></div><h3 className="ops-subtitle">آخر الحركات</h3><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>السبب</th></tr></thead><tbody>{(data.movements??[]).map((m:any)=><tr key={m.id}><td>{new Date(m.created_at).toLocaleString("ar-EG")}</td><td>{m.products?.name}</td><td>{m.movement_type}</td><td>{m.quantity_delta}</td><td>{m.reason}</td></tr>)}</tbody></table></div></>}
+  {module==="purchases"&&<><form className="ops-form ops-purchase" onSubmit={e=>void submit(e,{action:"purchase",invoiceNumber:purchase.invoiceNumber,supplierName:purchase.supplierName,supplierPhone:purchase.supplierPhone,branchId,items:[{productId:purchase.productId,quantity:Number(purchase.quantity),unitCost:Number(purchase.unitCost)}],paidAmount:Number(purchase.paidAmount),cashAccountId:purchase.cashAccountId||null})}><h3>استلام مشتريات عامة</h3><div className="ops-fields"><label>رقم فاتورة المورد<input required value={purchase.invoiceNumber} onChange={e=>setPurchase({...purchase,invoiceNumber:e.target.value})}/></label><label>المورد<input required value={purchase.supplierName} onChange={e=>setPurchase({...purchase,supplierName:e.target.value})}/></label><label>هاتف المورد<input value={purchase.supplierPhone} onChange={e=>setPurchase({...purchase,supplierPhone:e.target.value})}/></label><label>الصنف<select required value={purchase.productId} onChange={e=>setPurchase({...purchase,productId:e.target.value})}><option value="">اختر صنفًا</option>{products.map((p:any)=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label><label>الكمية<input type="number" min="1" required value={purchase.quantity} onChange={e=>setPurchase({...purchase,quantity:e.target.value})}/></label><label>تكلفة الوحدة<input type="number" min="0" step="0.01" required value={purchase.unitCost} onChange={e=>setPurchase({...purchase,unitCost:e.target.value})}/></label><label>المدفوع الآن<input type="number" min="0" step="0.01" value={purchase.paidAmount} onChange={e=>setPurchase({...purchase,paidAmount:e.target.value})}/></label><label>خزنة الدفع<select value={purchase.cashAccountId} onChange={e=>setPurchase({...purchase,cashAccountId:e.target.value})}><option value="">دون دفع الآن</option>{accounts.filter((a:any)=>a.branch_id===branchId).map((a:any)=><option value={a.id} key={a.id}>{a.name}</option>)}</select></label></div><button className="primary" disabled={busy||!purchase.productId}>استلام وإضافة للمخزون</button></form><div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>المورد</th><th>الفرع</th><th>الإجمالي</th><th>مدفوع</th><th>الحالة</th></tr></thead><tbody>{(data.purchases??[]).map((p:any)=><tr key={p.id}><td>{p.invoice_number}<small>{new Date(p.purchased_at).toLocaleDateString("ar-EG")}</small></td><td>{p.suppliers?.name}<small>{p.suppliers?.phone}</small></td><td>{p.branches?.name}</td><td>{money(Number(p.total_cost))}</td><td>{money(Number(p.amount_paid))}</td><td>{p.status}</td></tr>)}</tbody></table></div><p className="footnote">التوريد الحالي يستلم صنفًا واحدًا في العملية؛ يمكن تكرار فاتورة المورد ببنود متعددة في المرحلة التالية.</p></>}
+  {module==="seller-finance"&&<><div className="ops-forms"><form className="ops-form" onSubmit={e=>void submit(e,{action:"expense",branchId,cashAccountId:expense.cashAccountId,description:expense.description,category:expense.category,amount:Number(expense.amount),date:new Date().toISOString().slice(0,10)})}><h3>تسجيل مصروف الفرع</h3><label>البيان<input required value={expense.description} onChange={e=>setExpense({...expense,description:e.target.value})}/></label><label>بند المصروف<input required value={expense.category} onChange={e=>setExpense({...expense,category:e.target.value})}/></label><label>المبلغ<input type="number" min="0.01" step="0.01" required value={expense.amount} onChange={e=>setExpense({...expense,amount:e.target.value})}/></label><label>الخزنة أو وسيلة الدفع<select required value={expense.cashAccountId} onChange={e=>setExpense({...expense,cashAccountId:e.target.value})}><option value="">اختر حسابًا</option>{accounts.map((a:any)=><option value={a.id} key={a.id}>{a.name} · {a.payment_method}</option>)}</select></label><button className="primary" disabled={busy||!accounts.length}>حفظ المصروف</button>{!accounts.length&&<small className="footnote">اطلب من المالك إعداد خزنة لهذا الفرع.</small>}</form><form className="ops-form" onSubmit={e=>void submit(e,{action:"advanceRequest",branchId,amount:Number(payroll.amount),notes:payroll.notes})}><h3>طلب مسحوبات من الراتب</h3><label>المبلغ المطلوب<input required type="number" min="0.01" step="0.01" value={payroll.amount} onChange={e=>setPayroll({...payroll,amount:e.target.value})}/></label><label>السبب أو ملاحظة<input value={payroll.notes} onChange={e=>setPayroll({...payroll,notes:e.target.value})}/></label><button className="primary" disabled={busy}>إرسال الطلب للمراجعة</button></form></div><h3 className="ops-subtitle">مصروفاتي المسجلة</h3><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>البيان</th><th>البند</th><th>الخزنة</th><th>المبلغ</th></tr></thead><tbody>{(data.expenses??[]).map((x:any)=><tr key={x.id}><td>{x.expense_date}</td><td>{x.description}</td><td>{x.category}</td><td>{x.cash_accounts?.name}</td><td>{money(Number(x.amount))}</td></tr>)}</tbody></table></div><h3 className="ops-subtitle">طلبات المسحوبات</h3><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th><th>الحالة</th></tr></thead><tbody>{(data.requests??[]).map((x:any)=><tr key={x.id}><td>{new Date(x.created_at).toLocaleDateString("ar-EG")}</td><td>{money(Number(x.amount))}</td><td>{x.notes||"—"}</td><td>{x.status==="pending"?"قيد المراجعة":x.status==="paid"?"تم الصرف":"مرفوض"}</td></tr>)}</tbody></table></div></>} {module==="finance"&&<><div className="ops-forms"><form className="ops-form" onSubmit={e=>void submit(e,{action:"cashAccount",branchId,...cash,openingBalance:Number(cash.openingBalance)})}><h3>فتح خزنة أو حساب دفع</h3><label>الاسم<input required value={cash.name} onChange={e=>setCash({...cash,name:e.target.value})}/></label><label>نوع الحساب<select value={cash.accountType} onChange={e=>setCash({...cash,accountType:e.target.value})}><option value="cash">نقدي</option><option value="bank">بنك</option><option value="digital">محفظة رقمية</option></select></label><label>طريقة الدفع<select value={cash.paymentMethod} onChange={e=>setCash({...cash,paymentMethod:e.target.value})}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="instapay">إنستاباي</option><option value="other">أخرى</option></select></label><label>الرصيد الافتتاحي<input type="number" min="0" value={cash.openingBalance} onChange={e=>setCash({...cash,openingBalance:e.target.value})}/></label><button className="primary" disabled={busy}>إنشاء الحساب</button></form><form className="ops-form" onSubmit={e=>void submit(e,{action:"expense",branchId,cashAccountId:expense.cashAccountId,description:expense.description,category:expense.category,amount:Number(expense.amount),date:new Date().toISOString().slice(0,10)})}><h3>تسجيل مصروف</h3><label>البيان<input required value={expense.description} onChange={e=>setExpense({...expense,description:e.target.value})}/></label><label>البند<input required value={expense.category} onChange={e=>setExpense({...expense,category:e.target.value})}/></label><label>المبلغ<input type="number" min="0.01" step="0.01" required value={expense.amount} onChange={e=>setExpense({...expense,amount:e.target.value})}/></label><label>من خزنة<select required value={expense.cashAccountId} onChange={e=>setExpense({...expense,cashAccountId:e.target.value})}><option value="">اختر حسابًا</option>{accounts.filter((a:any)=>a.branch_id===branchId).map((a:any)=><option value={a.id} key={a.id}>{a.name} ({money(a.balance)})</option>)}</select></label><button className="primary" disabled={busy}>حفظ المصروف</button></form></div><h3 className="ops-subtitle">أرصدة الخزائن</h3><div className="ops-account-grid">{accounts.map((a:any)=><article className="ops-account" key={a.id}><small>{a.branches?.name} · {a.payment_method}</small><strong>{a.name}</strong><b>{money(a.balance)}</b></article>)}</div><h3 className="ops-subtitle">طلبات سلف الموظفين والبائعين</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفرع</th><th>التاريخ</th><th>المبلغ</th><th>السبب</th><th>إجراء</th></tr></thead><tbody>{(data.requests??[]).map((x:any)=><tr key={x.id}><td>{x.user_profiles?.full_name}<small>{x.user_profiles?.phone}</small></td><td>{x.branches?.name}</td><td>{new Date(x.created_at).toLocaleDateString("ar-EG")}</td><td>{money(Number(x.amount))}</td><td>{x.notes||"—"}</td><td><div className="ops-inline-pay"><select aria-label="خزنة الصرف" value={payroll.cashAccountId} onChange={e=>setPayroll({...payroll,cashAccountId:e.target.value})}><option value="">اختر خزنة</option>{accounts.filter((a:any)=>a.branch_id===x.branch_id).map((a:any)=><option value={a.id} key={a.id}>{a.name}</option>)}</select><button className="row-action" disabled={busy||!payroll.cashAccountId} onClick={()=>void submit(new Event("submit") as unknown as FormEvent,{action:"advanceDecision",requestId:x.id,decision:"pay",cashAccountId:payroll.cashAccountId})}>اعتماد وصرف</button><button className="row-action" disabled={busy} onClick={()=>void submit(new Event("submit") as unknown as FormEvent,{action:"advanceDecision",requestId:x.id,decision:"reject",cashAccountId:null})}>رفض</button></div></td></tr>)}{!(data.requests??[]).length&&<tr><td colSpan={6} className="table-empty">لا توجد طلبات معلقة.</td></tr>}</tbody></table></div><h3 className="ops-subtitle">المصروفات</h3><div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الفرع</th><th>البيان</th><th>الفئة</th><th>القيمة</th></tr></thead><tbody>{(data.expenses??[]).map((x:any)=><tr key={x.id}><td>{x.expense_date}</td><td>{x.branches?.name}</td><td>{x.description}</td><td>{x.category}</td><td>{money(Number(x.amount))}</td></tr>)}</tbody></table></div><p className="footnote">يجب إنشاء حساب دفع لكل طريقة مستخدمة قبل تسجيل دفعات البيع بها.</p></>}
+- {module==="staff"&&<><div className="ops-forms"><form className="ops-form" onSubmit={e=>void submit(e,{action:"payrollCreate",employeeId:payroll.employeeId,periodStart:payroll.periodStart,periodEnd:payroll.periodEnd,deductions:Number(payroll.deductions),notes:""})}><h3>إنشاء كشف راتب</h3><label>الموظف<select required value={payroll.employeeId} onChange={e=>setPayroll({...payroll,employeeId:e.target.value})}><option value="">اختر موظفًا</option>{employees.map((x:any)=><option value={x.id} key={x.id}>{x.full_name} · {money(Number(x.base_salary))}</option>)}</select></label><label>من<input type="date" required value={payroll.periodStart} onChange={e=>setPayroll({...payroll,periodStart:e.target.value})}/></label><label>إلى<input type="date" required value={payroll.periodEnd} onChange={e=>setPayroll({...payroll,periodEnd:e.target.value})}/></label><label>خصومات<input type="number" min="0" value={payroll.deductions} onChange={e=>setPayroll({...payroll,deductions:e.target.value})}/></label><button className="primary" disabled={busy||!employees.length}>احتساب الراتب والعمولة</button></form></div><h3 className="ops-subtitle">الموظفون</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفرع</th><th>الأساسي</th><th>نسبة العمولة</th><th>الوظيفة</th></tr></thead><tbody>{employees.map((x:any)=><tr key={x.id}><td>{x.full_name}<small>{x.phone}</small></td><td>{x.branches?.name}</td><td>{money(Number(x.base_salary))}</td><td>{x.commission_rate}%</td><td>{x.job_title}</td></tr>)}</tbody></table></div><h3 className="ops-subtitle">كشوف الرواتب</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفترة</th><th>أساسي</th><th>عمولة</th><th>خصم</th><th>مدفوع</th><th>صرف</th></tr></thead><tbody>{(data.payroll??[]).map((x:any)=><tr key={x.id}><td>{employees.find((e:any)=>e.id===x.employee_id)?.full_name??"موظف"}</td><td>{x.period_start} – {x.period_end}</td><td>{money(Number(x.base_salary))}</td><td>{money(Number(x.commission_amount))}</td><td>{money(Number(x.deductions))}</td><td>{money(Number(x.amount_paid))}</td><td>{x.status==="pending"?<form className="ops-inline-pay" onSubmit={e=>void submit(e,{action:"payrollPay",payrollId:x.id,cashAccountId:payroll.cashAccountId,amount:Number(payroll.amount)})}><select required value={payroll.cashAccountId} onChange={e=>setPayroll({...payroll,cashAccountId:e.target.value})}><option value="">الخزنة</option>{accounts.filter((a:any)=>a.branch_id===branchId).map((a:any)=><option value={a.id} key={a.id}>{a.name}</option>)}</select><input required type="number" min="0.01" step="0.01" placeholder="مبلغ" value={payroll.amount} onChange={e=>setPayroll({...payroll,amount:e.target.value})}/><button className="row-action" disabled={busy}>صرف</button></form>:"مكتمل"}</td></tr>)}</tbody></table></div><p className="footnote">تُحسب العمولة من الفواتير غير الملغاة المنسوبة لحساب الموظف المرتبط بالمستخدم. الموظف غير المرتبط بحساب بائع تظهر عمولته صفرًا.</p></>}
++ {module==="staff"&&<><div className="ops-forms"><form className="ops-form" onSubmit={e=>void submit(e,{action:"payrollCreate",employeeId:payroll.employeeId,periodStart:payroll.periodStart,periodEnd:payroll.periodEnd,deductions:Number(payroll.deductions),notes:""})}><h3>إنشاء كشف راتب أسبوعي</h3><label>الموظف<select required value={payroll.employeeId} onChange={e=>setPayroll({...payroll,employeeId:e.target.value})}><option value="">اختر موظفًا</option>{employees.map((x:any)=><option value={x.id} key={x.id}>{x.full_name} · {money(Number(x.base_salary))} / أسبوع</option>)}</select></label><label>من<input type="date" required value={payroll.periodStart} onChange={e=>setPayroll({...payroll,periodStart:e.target.value})}/></label><label>إلى<input type="date" required value={payroll.periodEnd} onChange={e=>setPayroll({...payroll,periodEnd:e.target.value})}/></label><label>خصومات<input type="number" min="0" value={payroll.deductions} onChange={e=>setPayroll({...payroll,deductions:e.target.value})}/></label><button className="primary" disabled={busy||!employees.length}>احتساب الراتب والعمولة</button></form></div><h3 className="ops-subtitle">الموظفون</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفرع</th><th>الراتب الأسبوعي</th><th>نسبة العمولة</th><th>الوظيفة</th></tr></thead><tbody>{employees.map((x:any)=><tr key={x.id}><td>{x.full_name}<small>{x.phone}</small></td><td>{x.branches?.name}</td><td>{money(Number(x.base_salary))}</td><td>{x.commission_rate}%</td><td>{x.job_title}</td></tr>)}</tbody></table></div><h3 className="ops-subtitle">كشوف الرواتب</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفترة</th><th>أساسي</th><th>عمولة</th><th>خصم</th><th>مدفوع</th><th>صرف</th></tr></thead><tbody>{(data.payroll??[]).map((x:any)=><tr key={x.id}><td>{employees.find((e:any)=>e.id===x.employee_id)?.full_name??"موظف"}</td><td>{x.period_start} – {x.period_end}</td><td>{money(Number(x.base_salary))}</td><td>{money(Number(x.commission_amount))}</td><td>{money(Number(x.deductions))}</td><td>{money(Number(x.amount_paid))}</td><td>{x.status==="pending"?<form className="ops-inline-pay" onSubmit={e=>void submit(e,{action:"payrollPay",payrollId:x.id,cashAccountId:payroll.cashAccountId,amount:Number(payroll.amount)})}><select required value={payroll.cashAccountId} onChange={e=>setPayroll({...payroll,cashAccountId:e.target.value})}><option value="">الخزنة</option>{accounts.filter((a:any)=>a.branch_id===branchId).map((a:any)=><option value={a.id} key={a.id}>{a.name}</option>)}</select><input required type="number" min="0.01" step="0.01" placeholder="مبلغ" value={payroll.amount} onChange={e=>setPayroll({...payroll,amount:e.target.value})}/><button className="row-action" disabled={busy}>صرف</button></form>:"مكتمل"}</td></tr>)}</tbody></table></div><p className="footnote">تُحسب العمولة من الفواتير غير الملغاة المنسوبة لحساب الموظف المرتبط بالمستخدم. الموظف غير المرتبط بحساب بائع تظهر عمولته صفرًا.</p></>}
+  </section>
+ }
+diff --git a/src/components/shift-panel.tsx b/src/components/shift-panel.tsx
+index 995d4d0..ed5f77c 100644
+--- a/src/components/shift-panel.tsx
++++ b/src/components/shift-panel.tsx
+@@ -70,14 +70,15 @@ export default function ShiftPanel() {
+ 
+   if (!data || data.owner) return null;
+   const account = data.accounts.find((a) => a.id === accountId);
+-  const monthKey = new Date().toISOString().slice(0, 7);
+-  const monthMs = data.shifts.filter((s) => s.opened_at.slice(0, 7) === monthKey).reduce((sum, s) => sum + durationOf(s, now), 0);
++  // Hours are counted per shop week (Saturday -> Friday), not per month.
++  const weekStartMs = (() => { const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return d.getTime(); })();
++  const weekMs = data.shifts.filter((s) => new Date(s.opened_at).getTime() >= weekStartMs).reduce((sum, s) => sum + durationOf(s, now), 0);
+   const history = data.shifts.filter((s) => s.status === "closed").slice(0, 10);
+ 
+   return (
+     <section className="panel shift-panel">
+       <div className="section-heading"><div><p className="eyebrow">اليومية</p><h2>{open ? "يوم عمل جارٍ" : "لا توجد وردية مفتوحة"}</h2></div>
+-        {monthMs > 0 && <span className="count-badge" title="آخر 20 وردية">ساعات هذا الشهر: {hoursLabel(monthMs)}</span>}</div>
++        {weekMs > 0 && <span className="count-badge" title="من يوم السبت">ساعات هذا الأسبوع: {hoursLabel(weekMs)}</span>}</div>
+       {error && <p className="notice error" role="alert">{error}</p>}
+       {message && <p className="notice success" role="status">{message}</p>}
+       {open ? (
+diff --git a/src/components/staff-hours.tsx b/src/components/staff-hours.tsx
+index 8ccdec9..b620842 100644
+--- a/src/components/staff-hours.tsx
++++ b/src/components/staff-hours.tsx
+@@ -12,12 +12,13 @@ const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency",
+ const dayText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { weekday: "short", day: "numeric", month: "short" }).format(new Date(iso));
+ const timeText = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+ const localDay = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+-const monthStart = () => { const d = new Date(); return localDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
++// The shop week runs Saturday -> Friday. offset 0 = this week, -1 = last week.
++const weekRange = (offset = 0) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7) + offset * 7); const start = new Date(d); const end = new Date(d); end.setDate(end.getDate() + 6); const today = localDay(new Date()); return { from: localDay(start), to: offset === 0 ? today : localDay(end) }; };
+ 
+ /** Owner-only report of every seller's worked hours, built from their opened/closed shifts. */
+ export default function StaffHours({ branches }: { branches: Branch[] }) {
+-  const [from, setFrom] = useState(monthStart);
+-  const [to, setTo] = useState(() => localDay(new Date()));
++  const [from, setFrom] = useState(() => weekRange(0).from);
++  const [to, setTo] = useState(() => weekRange(0).to);
+   const [branchId, setBranchId] = useState("");
+   const [shifts, setShifts] = useState<Shift[]>([]);
+   const [error, setError] = useState("");
+@@ -54,11 +55,12 @@ export default function StaffHours({ branches }: { branches: Branch[] }) {
+   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
+ 
+   return <section className="panel operations-panel">
+-    <div className="section-heading"><div><p className="eyebrow">من الورديات المفتوحة والمغلقة</p><h2>ساعات عمل الموظفين</h2></div><span className="count-badge">الإجمالي: {hoursLabel(totalMs)}</span></div>
++    <div className="section-heading"><div><p className="eyebrow">أسبوعي: من السبت إلى الجمعة</p><h2>ساعات عمل الموظفين</h2></div><span className="count-badge">الإجمالي: {hoursLabel(totalMs)}</span></div>
+     {error && <div className="notice error" role="alert">{error}</div>}
+     <div className="ops-toolbar">
+       <label>من<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
+       <label>إلى<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
++      <div className="week-shortcuts"><button type="button" className="row-action" onClick={() => { const w = weekRange(0); setFrom(w.from); setTo(w.to); }}>هذا الأسبوع</button><button type="button" className="row-action" onClick={() => { const w = weekRange(-1); setFrom(w.from); setTo(w.to); }}>الأسبوع الماضي</button></div>
+       <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+       <button type="button" className="row-action" onClick={() => void load()} disabled={busy}>{busy ? "جارٍ التحديث…" : "تحديث"}</button>
+     </div>
+diff --git a/src/components/workspace.tsx b/src/components/workspace.tsx
+index 09cab93..5d35e9a 100644
+--- a/src/components/workspace.tsx
++++ b/src/components/workspace.tsx
+@@ -13,6 +13,7 @@ import DeliveriesPanel from "@/components/deliveries-panel";
+ import { InstallButton } from "@/components/pwa";
+ import CentralCash from "@/components/central-cash";
+ import StaffHours from "@/components/staff-hours";
++import AccountSection from "@/components/account-section";
+ 
+ type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
+ type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
+@@ -113,13 +114,14 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+   }
+   function toggleInList(list: string[], item: string) { return list.includes(item) ? list.filter((x) => x !== item) : [...list, item]; }
+ 
+-  if (!user) return <main className="login-wrap"><div className="login-card"><div className="brand-mark">ن</div><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
++  if (!user) return <main className="login-wrap"><div className="login-card"><img className="brand-logo" src="/icons/icon-192.png" alt="نظرة" width={56} height={56}/><p className="eyebrow">نظام إدارة البصريات</p><h1>مرحبًا بعودتك</h1><p className="muted">سجّل الدخول لمتابعة فروعك من مكان واحد.</p>
+     <form onSubmit={handleLogin} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={loginPhone} onChange={(e) => { const value = e.target.value; setLoginPhone(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setLoginPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
+     <Notice error={error} message={message}/><div className="secure-note"><span className="dot"/> الاتصال بالخادم مطلوب لحفظ كل عملية</div></div></main>;
+ 
+-  return <main className="app-shell"><header className="topbar"><div className="brand"><div className="brand-mark small">ن</div><div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{user.name.slice(0, 1)}</span><span>{user.name}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
++  return <main className="app-shell"><header className="topbar"><div className="brand"><img className="brand-logo small" src="/icons/icon-192.png" alt="نظرة" width={38} height={38}/><div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{user.name.slice(0, 1)}</span><span>{user.name}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
+     <nav className="workspace-tabs" aria-label="أقسام النظام" role="tablist">
+       <Tab id="overview" active={activeTab} setActive={setActiveTab}>نظرة عامة</Tab>
++      <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
+       {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
+       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
+       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
+@@ -128,14 +130,15 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     </nav>
+     <Notice error={error} message={message}/>
+     {activeTab === "overview" && <>
+-    <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "الفروع المتاحة لك تظهر هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
+-    <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={isOwner ? String(staff.length).padStart(2, "0") : "—"} detail={isOwner ? "حسابات المستخدمين" : "حسب صلاحيتك"}/></section>
++    <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "ابدأ يوم عملك وسجّل فواتيرك من هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
++    {isOwner && <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={String(staff.length).padStart(2, "0")} detail="حسابات المستخدمين"/></section>}
+     <ShiftPanel />
+     {isOwner && <DailyOverview />}
+     <FinanceCharts />
+     {isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
+       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
+     </section>}</>}
++    {activeTab === "account" && <AccountSection isOwner={isOwner} />}
+     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
+     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
+     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+@@ -151,8 +154,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
+     {isOwner && activeTab === "branches" && <>
+     {isOwner && <div className="admin-grid"><section className="panel form-panel" id="branch-form"><div className="section-heading"><div><p className="eyebrow">توسّع منظّم</p><h2>{editingBranch ? "تعديل بيانات الفرع" : "إضافة فرع"}</h2></div><span className="soft-icon">{editingBranch ? "✎" : "＋"}</span></div><form className="form-grid" onSubmit={createBranch}><label>اسم الفرع<input required minLength={2} value={branchForm.name} onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })} placeholder="مثال: فرع المعادي"/></label><label>كود الفرع<input required minLength={2} value={branchForm.code} onChange={(e) => setBranchForm({ ...branchForm, code: e.target.value })} placeholder="MAA-01"/></label><label className="wide">العنوان<input value={branchForm.address} onChange={(e) => setBranchForm({ ...branchForm, address: e.target.value })} placeholder="المنطقة والشارع"/></label><label>رقم التواصل<input type="tel" value={branchForm.phone} onChange={(e) => setBranchForm({ ...branchForm, phone: e.target.value })} placeholder="01xxxxxxxxx"/></label><button className="primary" disabled={busy}>{editingBranch ? "حفظ التعديلات" : "حفظ الفرع"}</button>{editingBranch && <button type="button" className="quiet" onClick={() => { setEditingBranch(null); setBranchForm({ code: "", name: "", address: "", phone: "" }); }}>إلغاء التعديل</button>}</form></section>
+-      <section className="panel form-panel"><div className="section-heading"><div><p className="eyebrow">فريقك</p><h2>إضافة بائع</h2></div><span className="soft-icon">♙</span></div><form className="form-grid" onSubmit={createStaff}><label>اسم الموظف<input required minLength={2} value={staffForm.name} onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}/></label><label>رقم الموبايل<input type="tel" inputMode="tel" required value={staffForm.phone} onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}/></label><label>الراتب الأساسي<input type="number" min="0" value={staffForm.baseSalary} onChange={(e)=>setStaffForm({...staffForm,baseSalary:e.target.value})}/></label><label>عمولة المبيعات %<input type="number" min="0" max="100" step="0.01" value={staffForm.commissionRate} onChange={(e)=>setStaffForm({...staffForm,commissionRate:e.target.value})}/></label><p className="wide footnote">كلمة المرور المبدئية للبائع هي رقم هاتفه بعد حذف الصفر الأول.</p><fieldset className="wide"><legend>الفروع المسموح بها</legend><div className="checks">{branches.filter((b) => b.status === "ACTIVE").map((b) => <label className="check" key={b.id}><input type="checkbox" checked={staffForm.branchIds.includes(b.id)} onChange={() => setStaffForm({ ...staffForm, branchIds: toggleInList(staffForm.branchIds, b.id) })}/>{b.name}</label>)}</div></fieldset><fieldset className="wide"><legend>صلاحيات البائع</legend><div className="checks">{permissionList.map((p) => <label className="check" key={p.key}><input type="checkbox" checked={staffForm.permissionKeys.includes(p.key)} onChange={() => setStaffForm({ ...staffForm, permissionKeys: toggleInList(staffForm.permissionKeys, p.key) })}/>{p.label}</label>)}</div></fieldset><button className="primary" disabled={busy || branches.filter((b) => b.status === "ACTIVE").length === 0}>{editingStaff?"حفظ بيانات الموظف":"إنشاء حساب الموظف"}</button></form></section></div>}
+-    <section className="panel staff-panel"><div className="section-heading"><div><p className="eyebrow">الوصول</p><h2>المستخدمون</h2></div><span className="count-badge">{staff.length} حساب</span></div><div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الدور</th><th>الفروع</th><th>الراتب والعمولة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{staff.map((person) => <tr key={person.id}><td><strong>{person.name}</strong><small>{person.phone}</small></td><td>{person.roles.map((r) => r.role.name).join("، ")}</td><td>{person.branchAccess.map((b) => b.branch.name).join("، ") || "—"}</td><td>{person.employee?`${person.employee.base_salary} ج · ${person.employee.commission_rate}%`:"—"}</td><td><span className={`status ${person.status === "ACTIVE" ? "active" : "inactive"}`}>{person.status === "ACTIVE" ? "نشط" : "موقوف"}</span></td><td><button className="row-action" disabled={busy} onClick={() => editStaff(person)}>تعديل</button> <button className="row-action" disabled={busy} onClick={() => void toggleStaff(person)}>{person.status === "ACTIVE" ? "إيقاف" : "تفعيل"}</button></td></tr>)}{staff.length === 0 && <tr><td colSpan={6} className="table-empty">لم تتم إضافة مستخدمين بعد.</td></tr>}</tbody></table></div><p className="footnote">الأدوار المتاحة: مالك البراند وبائع. صلاحيات مدير الفرع غير موجودة.</p></section></>}
++      <section className="panel form-panel"><div className="section-heading"><div><p className="eyebrow">فريقك</p><h2>إضافة بائع</h2></div><span className="soft-icon">♙</span></div><form className="form-grid" onSubmit={createStaff}><label>اسم الموظف<input required minLength={2} value={staffForm.name} onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}/></label><label>رقم الموبايل<input type="tel" inputMode="tel" required value={staffForm.phone} onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })}/></label><label>الراتب الأسبوعي<input type="number" min="0" value={staffForm.baseSalary} onChange={(e)=>setStaffForm({...staffForm,baseSalary:e.target.value})}/></label><label>عمولة المبيعات %<input type="number" min="0" max="100" step="0.01" value={staffForm.commissionRate} onChange={(e)=>setStaffForm({...staffForm,commissionRate:e.target.value})}/></label><p className="wide footnote">كلمة المرور المبدئية للبائع هي رقم هاتفه بعد حذف الصفر الأول.</p><fieldset className="wide"><legend>الفروع المسموح بها</legend><div className="checks">{branches.filter((b) => b.status === "ACTIVE").map((b) => <label className="check" key={b.id}><input type="checkbox" checked={staffForm.branchIds.includes(b.id)} onChange={() => setStaffForm({ ...staffForm, branchIds: toggleInList(staffForm.branchIds, b.id) })}/>{b.name}</label>)}</div></fieldset><fieldset className="wide"><legend>صلاحيات البائع</legend><div className="checks">{permissionList.map((p) => <label className="check" key={p.key}><input type="checkbox" checked={staffForm.permissionKeys.includes(p.key)} onChange={() => setStaffForm({ ...staffForm, permissionKeys: toggleInList(staffForm.permissionKeys, p.key) })}/>{p.label}</label>)}</div></fieldset><button className="primary" disabled={busy || branches.filter((b) => b.status === "ACTIVE").length === 0}>{editingStaff?"حفظ بيانات الموظف":"إنشاء حساب الموظف"}</button></form></section></div>}
++    <section className="panel staff-panel"><div className="section-heading"><div><p className="eyebrow">الوصول</p><h2>المستخدمون</h2></div><span className="count-badge">{staff.length} حساب</span></div><div className="table-wrap"><table><thead><tr><th>المستخدم</th><th>الدور</th><th>الفروع</th><th>الراتب الأسبوعي والعمولة</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{staff.map((person) => <tr key={person.id}><td><strong>{person.name}</strong><small>{person.phone}</small></td><td>{person.roles.map((r) => r.role.name).join("، ")}</td><td>{person.branchAccess.map((b) => b.branch.name).join("، ") || "—"}</td><td>{person.employee?`${person.employee.base_salary} ج / أسبوع · ${person.employee.commission_rate}%`:"—"}</td><td><span className={`status ${person.status === "ACTIVE" ? "active" : "inactive"}`}>{person.status === "ACTIVE" ? "نشط" : "موقوف"}</span></td><td><button className="row-action" disabled={busy} onClick={() => editStaff(person)}>تعديل</button> <button className="row-action" disabled={busy} onClick={() => void toggleStaff(person)}>{person.status === "ACTIVE" ? "إيقاف" : "تفعيل"}</button></td></tr>)}{staff.length === 0 && <tr><td colSpan={6} className="table-empty">لم تتم إضافة مستخدمين بعد.</td></tr>}</tbody></table></div><p className="footnote">الأدوار المتاحة: مالك البراند وبائع. صلاحيات مدير الفرع غير موجودة.</p></section></>}
+     <footer>نظرة <span>•</span> إدارة واحدة لكل فروعك</footer></main>;
+ }
+ function Notice({ error, message }: { error: string; message: string }) { if (!error && !message) return null; return <div className={`notice ${error ? "error" : "success"}`} role="status">{error || message}</div>; }
+diff --git a/src/lib/week.ts b/src/lib/week.ts
+new file mode 100644
+index 0000000..2be49cc
+--- /dev/null
++++ b/src/lib/week.ts
+@@ -0,0 +1,23 @@
++// Pay weeks and working hours run Saturday -> Friday in Cairo time (the shop week).
++const TZ = "Africa/Cairo";
++const DAY = 86400000;
++
++function offsetMs(ms: number) {
++  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
++  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
++}
++/** UTC instant of 00:00 Cairo time on the given calendar day (YYYY-MM-DD). */
++export function cairoMidnight(dateStr: string) {
++  const [y, m, d] = dateStr.split("-").map(Number);
++  const guess = Date.UTC(y, m - 1, d);
++  const first = guess - offsetMs(guess - 3 * 3600000);
++  return new Date(guess - offsetMs(first));
++}
++export const todayCairo = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date());
++export const addDays = (dateStr: string, n: number) => new Date(Date.parse(`${dateStr}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
++/** Saturday on or before the given day. */
++export const weekStartOf = (dateStr: string) => addDays(dateStr, -((new Date(`${dateStr}T00:00:00Z`).getUTCDay() + 1) % 7));
++export function currentWeek() {
++  const start = weekStartOf(todayCairo());
++  return { start, end: addDays(start, 6), from: cairoMidnight(start).toISOString(), to: cairoMidnight(addDays(start, 7)).toISOString() };
++}
+diff --git a/supabase/migrations/20261017150000_lens_order_receiving.sql b/supabase/migrations/20261017150000_lens_order_receiving.sql
+new file mode 100644
+index 0000000..347d0bd
+--- /dev/null
++++ b/supabase/migrations/20261017150000_lens_order_receiving.sql
+@@ -0,0 +1,42 @@
++-- Receiving customer-ordered prescription lenses against a supplier invoice.
++-- Each prescription lens line on a sale (sale_items.item_kind = 'prescription_lens') is one order to the lens company.
++alter table public.sale_items add column if not exists lens_received_at timestamptz;
++alter table public.sale_items add column if not exists lens_supply_id uuid references public.lens_supplies(id) on delete set null;
++alter table public.lens_supply_items add column if not exists sale_item_id uuid references public.sale_items(id) on delete set null;
++
++create index if not exists sale_items_pending_lens_idx on public.sale_items(sale_id) where item_kind = 'prescription_lens' and lens_received_at is null;
++create index if not exists sale_items_lens_supply_idx on public.sale_items(lens_supply_id) where lens_supply_id is not null;
++create index if not exists lens_supply_items_sale_item_idx on public.lens_supply_items(sale_item_id) where sale_item_id is not null;
++
++-- Records the supplier invoice and marks the chosen ordered lenses as received.
++-- Lenses cut for a specific customer never enter branch stock, so stock is deliberately untouched.
++create or replace function public.receive_ordered_lenses(
++  p_invoice_number text, p_supplier_name text, p_supplier_phone text, p_branch_id uuid,
++  p_received_at timestamptz, p_items jsonb, p_created_by uuid
++) returns uuid language plpgsql security definer set search_path = '' as $$
++declare v_supplier_id uuid; v_supply_id uuid; v_total numeric(12,2); v_item jsonb; v_ok integer;
++begin
++  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'supply needs items'; end if;
++  -- Lock the chosen lines and make sure every one is still an unreceived lens order of this branch.
++  select count(*) into v_ok from public.sale_items si join public.sales s on s.id = si.sale_id
++  where si.id in (select (value->>'saleItemId')::uuid from jsonb_array_elements(p_items))
++    and si.item_kind = 'prescription_lens' and si.lens_received_at is null
++    and s.branch_id = p_branch_id and s.delivery_status <> 'cancelled';
++  if v_ok <> jsonb_array_length(p_items) then raise exception 'lens item unavailable'; end if;
++  perform 1 from public.sale_items where id in (select (value->>'saleItemId')::uuid from jsonb_array_elements(p_items)) for update;
++  insert into public.suppliers(name,phone) values(trim(p_supplier_name),nullif(trim(p_supplier_phone),''))
++  on conflict (name) do update set phone = coalesce(excluded.phone, public.suppliers.phone)
++  returning id into v_supplier_id;
++  select sum((value->>'unitCost')::numeric) into v_total from jsonb_array_elements(p_items);
++  insert into public.lens_supplies(invoice_number,supplier_id,branch_id,received_at,total_cost,created_by)
++  values(trim(p_invoice_number),v_supplier_id,p_branch_id,p_received_at,v_total,p_created_by) returning id into v_supply_id;
++  for v_item in select value from jsonb_array_elements(p_items) loop
++    insert into public.lens_supply_items(supply_id,product_id,quantity,unit_cost,sale_item_id)
++    values(v_supply_id,(v_item->>'productId')::uuid,1,(v_item->>'unitCost')::numeric,(v_item->>'saleItemId')::uuid);
++    update public.sale_items set lens_received_at = p_received_at, lens_supply_id = v_supply_id where id = (v_item->>'saleItemId')::uuid;
++  end loop;
++  return v_supply_id;
++end;
++$$;
++revoke all on function public.receive_ordered_lenses(text,text,text,uuid,timestamptz,jsonb,uuid) from public, anon, authenticated;
++grant execute on function public.receive_ordered_lenses(text,text,text,uuid,timestamptz,jsonb,uuid) to service_role;

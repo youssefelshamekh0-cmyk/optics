@@ -30,7 +30,9 @@ export async function GET(request: Request) {
   const dateParam = params.get("date");
   const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && !Number.isNaN(Date.parse(dateParam)) ? dateParam : today;
   const from = cairoMidnight(date).toISOString(), to = cairoMidnight(addDays(date, 1)).toISOString();
-  const monthFrom = cairoMidnight(`${date.slice(0, 7)}-01`).toISOString();
+  // Staff hours and pay run weekly (Saturday to Friday), so the report covers the week that contains the selected day.
+  const weekStartDate = addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 1) % 7));
+  const weekFrom = cairoMidnight(weekStartDate).toISOString(), weekTo = cairoMidnight(addDays(weekStartDate, 7)).toISOString();
   const admin = getSupabaseAdmin() as any;
 
   const branchQuery = admin.from("branches").select("id,name,code,status").eq("status", "active").order("name");
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
   const requested = params.get("branchId");
   if (requested && requested !== "all" && !allowed.includes(requested)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
   const branchIds: string[] = requested && requested !== "all" ? [requested] : allowed;
-  if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], monthHours: [] });
+  if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], weekHours: [], weekStart: weekStartDate });
 
   // Invoices of the day (sellers only see their own).
   let salesQuery = admin.from("sales").select("id,invoice_number,branch_id,customer_id,created_by,grand_total,delivery_status,created_at").in("branch_id", branchIds).gte("created_at", from).lt("created_at", to).order("created_at", { ascending: false }).limit(500);
@@ -69,7 +71,7 @@ export async function GET(request: Request) {
   });
   const live = invoices.filter((i: any) => i.status !== "cancelled");
 
-  // Shifts of the day (+ still-open ones when looking at today) and month hours.
+  // Shifts of the day (+ still-open ones when looking at today) and the week's hours.
   let dayShifts = admin.from("seller_shifts").select("id,user_id,branch_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,user_profiles(full_name),branches(name)").in("branch_id", branchIds).gte("opened_at", from).lt("opened_at", to).order("opened_at", { ascending: false });
   let openShifts = date === today ? admin.from("seller_shifts").select("id,user_id,branch_id,opening_cash,closing_cash,expected_cash,variance,status,opened_at,closed_at,user_profiles(full_name),branches(name)").in("branch_id", branchIds).eq("status", "open") : null;
   if (!isOwner) { dayShifts = dayShifts.eq("user_id", user.id); if (openShifts) openShifts = openShifts.eq("user_id", user.id); }
@@ -79,12 +81,12 @@ export async function GET(request: Request) {
   for (const s of [...(openRes.data ?? []), ...(dayRes.data ?? [])]) shiftMap.set(s.id, s);
   const shifts = [...shiftMap.values()].sort((a, b) => b.opened_at.localeCompare(a.opened_at)).map((s: any) => ({ id: s.id, user: s.user_profiles?.full_name ?? "—", branch: s.branches?.name ?? "", opened_at: s.opened_at, closed_at: s.closed_at, status: s.status, opening_cash: Number(s.opening_cash), closing_cash: s.closing_cash == null ? null : Number(s.closing_cash), variance: isOwner && s.variance != null ? Number(s.variance) : null }));
 
-  let monthHours: { user_id: string; name: string; seconds: number; shifts: number }[] = [];
+  let weekHours: { user_id: string; name: string; seconds: number; shifts: number }[] = [];
   if (isOwner) {
-    const rows = await fetchAll(admin.from("seller_shifts").select("user_id,opened_at,closed_at,user_profiles(full_name)").in("branch_id", branchIds).gte("opened_at", monthFrom).lt("opened_at", cairoMidnight(addDays(date.slice(0, 7) + "-28", 5).slice(0, 7) + "-01").toISOString()));
+    const rows = await fetchAll(admin.from("seller_shifts").select("user_id,opened_at,closed_at,user_profiles(full_name)").in("branch_id", branchIds).gte("opened_at", weekFrom).lt("opened_at", weekTo));
     const acc = new Map<string, { user_id: string; name: string; seconds: number; shifts: number }>();
     for (const r of rows) { const end = r.closed_at ? Date.parse(r.closed_at) : Date.now(); const cur = acc.get(r.user_id) ?? { user_id: r.user_id, name: r.user_profiles?.full_name ?? "—", seconds: 0, shifts: 0 }; cur.seconds += Math.max(0, (end - Date.parse(r.opened_at)) / 1000); cur.shifts += 1; acc.set(r.user_id, cur); }
-    monthHours = [...acc.values()].sort((a, b) => b.seconds - a.seconds).map((x) => ({ ...x, seconds: Math.round(x.seconds) }));
+    weekHours = [...acc.values()].sort((a, b) => b.seconds - a.seconds).map((x) => ({ ...x, seconds: Math.round(x.seconds) }));
   }
 
   let accounts: any[] = [], expenses: any[] = [], cashIn = 0, cashOut = 0, collected = 0, expensesTotal = 0;
@@ -111,6 +113,6 @@ export async function GET(request: Request) {
   return Response.json({
     role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all",
     summary: { invoices: live.length, sales: live.reduce((s: number, i: any) => s + i.total, 0), collected, due: live.reduce((s: number, i: any) => s + i.due, 0), expenses: expensesTotal, cashIn, cashOut },
-    invoices, accounts, expenses, shifts, monthHours,
+    invoices, accounts, expenses, shifts, weekHours, weekStart: weekStartDate,
   });
 }
