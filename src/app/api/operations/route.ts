@@ -45,12 +45,21 @@ export async function GET(request: Request) {
     if(!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
     const account=await admin.from("cash_accounts").select("id,name").eq("is_central",true).maybeSingle();if(account.error)throw account.error;
     if(!account.data)return Response.json({central:null});
-    const [balance,rows]=await Promise.all([admin.rpc("cash_account_balance",{p_account:account.data.id}),admin.from("cash_transactions").select("id,direction,amount,description,created_by,created_at").eq("cash_account_id",account.data.id).eq("transaction_type","central_deposit").order("created_at",{ascending:false}).limit(200)]);
-    if(balance.error||rows.error)throw balance.error??rows.error;
+    const [balance,rows,nonCashRows]=await Promise.all([
+      admin.rpc("cash_account_balance",{p_account:account.data.id}),
+      admin.from("cash_transactions").select("id,direction,amount,description,created_by,created_at").eq("cash_account_id",account.data.id).eq("transaction_type","central_deposit").order("created_at",{ascending:false}).limit(200),
+      admin.from("cash_accounts").select("id,branch_id,name,payment_method,opening_balance,active,branches(name)").eq("active",true).eq("is_central",false).not("branch_id","is",null).neq("payment_method","cash").order("name")
+    ]);
+    if(balance.error||rows.error||nonCashRows.error)throw balance.error??rows.error??nonCashRows.error;
+    const nonCashAccounts=await Promise.all((nonCashRows.data??[]).map(async (a:any)=>{
+      const result=await admin.rpc("cash_account_balance",{p_account:a.id});
+      if(result.error)throw result.error;
+      return {...a,balance:Number(result.data??0)};
+    }));
     const actorIds=[...new Set((rows.data??[]).map((x:any)=>x.created_by).filter(Boolean))];
     const profiles=actorIds.length?await admin.from("user_profiles").select("id,full_name").in("id",actorIds):{data:[],error:null};if(profiles.error)throw profiles.error;
     const names=new Map((profiles.data??[]).map((x:any)=>[x.id,x.full_name]));
-    return Response.json({central:{id:account.data.id,name:account.data.name,balance:Number(balance.data??0),deposits:(rows.data??[]).map((x:any)=>({id:x.id,amount:Number(x.amount),description:x.description,created_at:x.created_at,seller:names.get(x.created_by)??"—"}))}});
+    return Response.json({central:{id:account.data.id,name:account.data.name,balance:Number(balance.data??0),deposits:(rows.data??[]).map((x:any)=>({id:x.id,amount:Number(x.amount),description:x.description,created_at:x.created_at,seller:names.get(x.created_by)??"—"})),nonCashAccounts}});
   }
   if(module==="inventory") {
     let stock=admin.from("branch_products").select("branch_id,product_id,quantity,cost_price,reference_price,products(name,sku,category)").order("updated_at",{ascending:false}).limit(300);
@@ -103,6 +112,7 @@ const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("payrollCreate"),employeeId:uuid,periodStart:z.string().date(),periodEnd:z.string().date(),deductions:z.number().min(0),notes:z.string().max(500).default("")}),
  z.object({action:z.literal("payrollPay"),payrollId:uuid,cashAccountId:uuid,amount:z.number().positive(),operationId:uuid}),
  z.object({action:z.literal("purchase"),invoiceNumber:z.string().trim().min(1).max(100),supplierName:z.string().trim().min(2).max(160),supplierPhone:z.string().max(40).default(""),branchId:uuid,items:z.array(z.object({productId:uuid,quantity:z.number().int().min(1),unitCost:z.number().min(0)})).min(1).max(100),paidAmount:z.number().min(0),cashAccountId:uuid.nullable().optional()}),
+ z.object({action:z.literal("centralDeposit"),cashAccountId:uuid.nullable().optional()}),
 ]);
 
 export async function POST(request:Request){
@@ -110,8 +120,18 @@ export async function POST(request:Request){
  const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
- const admin=getSupabaseAdmin() as any; let entityId="";
- if(action==="deliverAndCollect"){
+ const admin=getSupabaseAdmin() as any; let entityId=""; let actionResult:any=null;
+ if(action==="centralDeposit"){
+   if(!user!.roles.includes("super_admin"))return Response.json({error:"توريد الحسابات غير النقدية للخزنة المركزية متاح للمالك فقط"},{status:403});
+   const {data,error}=await admin.rpc("deposit_non_cash_accounts_to_central",{p_account:parsed.data.cashAccountId??null,p_actor:user!.id});
+   if(error){
+     if(String(error.message).includes("selected account"))return Response.json({error:"الحساب المحدد غير نشط أو ليس حسابًا غير نقدي تابعًا لفرع."},{status:409});
+     if(String(error.message).includes("owner-only"))return Response.json({error:"توريد الحسابات غير النقدية متاح للمالك فقط"},{status:403});
+     throw error;
+   }
+   actionResult=data;
+   entityId=parsed.data.cashAccountId??user!.id;
+ }else if(action==="deliverAndCollect"){
    const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
    if (!parsed.data.cashAccountId) {
      const dueCheck = await admin.from("sale_payments").select("amount").eq("sale_id", parsed.data.saleId);
@@ -167,6 +187,6 @@ export async function POST(request:Request){
  }else if(action==="purchase"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,{});
- return Response.json({success:true,id:entityId||null});
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"?{result:actionResult}:{});
+ return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{})});
 }
