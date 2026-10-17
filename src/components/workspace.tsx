@@ -145,7 +145,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {!isOwner && activeTab === "seller-finance" && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
-    {isOwner && activeTab === "daily-registers" && <DailyOverview />}\n    {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
+    {isOwner && activeTab === "daily-registers" && <DailyOverview />}
+    {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "purchases" && <OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "finance" && <CentralCash />}
