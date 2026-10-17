@@ -8,7 +8,6 @@ const DATA_URL_PATTERN = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
-  if (!user.roles.includes("super_admin")) return Response.json({ error: "إعدادات العلامة التجارية للمالك فقط" }, { status: 403 });
   const admin = getSupabaseAdmin() as any;
   const { data, error } = await admin.from("brand_settings").select("logo_data_url,updated_at").eq("id", true).maybeSingle();
   if (error) return Response.json({ error: "تعذر تحميل إعدادات العلامة التجارية" }, { status: 500 });
