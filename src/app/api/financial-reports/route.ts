@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     ? await admin.from("sales").select("id,branch_id,branches(name)").in("id", paidSaleIds)
     : { data: [], error: null };
   if (paidSalesR.error) return Response.json({ error: "تعذر ربط التحصيلات بالفروع" }, { status: 500 });
-  const paidSaleBranch = new Map((paidSalesR.data ?? []).map((row: any) => [row.id, row.branch_id]));
+  const paidSaleBranch = new Map<string, string>((paidSalesR.data ?? []).map((row: any) => [row.id, row.branch_id] as const));
   const payments = rawPayments.filter((row: any) => {
     const id = paidSaleBranch.get(row.sale_id);
     return Boolean(id) && (!branchId || id === branchId);
@@ -118,9 +118,9 @@ export async function GET(request: Request) {
     return Response.json({ error: "تعذر مطابقة المدفوعات مع فروعها" }, { status: 500 });
   }
 
-  const expenseBranch = new Map((expenseRefsR.data ?? []).map((row: any) => [row.id, row.branch_id]));
-  const purchaseBranch = new Map((purchaseRefsR.data ?? []).map((row: any) => [row.id, row.branch_id]));
-  const payrollById = new Map((payrollRefsR.data ?? []).map((row: any) => [row.id, row]));
+  const expenseBranch = new Map<string, string>((expenseRefsR.data ?? []).map((row: any) => [row.id, row.branch_id] as const));
+  const purchaseBranch = new Map<string, string>((purchaseRefsR.data ?? []).map((row: any) => [row.id, row.branch_id] as const));
+  const payrollById = new Map<string, any>((payrollRefsR.data ?? []).map((row: any) => [row.id, row] as const));
   const branchForOutflow = (row: any) => {
     if (row.transaction_type === "expense") return expenseBranch.get(row.reference_id) ?? row.cash_accounts?.branch_id ?? null;
     if (row.transaction_type === "supplier_payment") return purchaseBranch.get(row.reference_id) ?? row.cash_accounts?.branch_id ?? null;
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
   const purchaseTotal = total(purchaseOutflows, "amount");
   const payrollTotal = total(payrollOutflows, "amount");
 
-  const branchNames = new Map((branchesR.data ?? []).map((row: any) => [row.id, row.name]));
+  const branchNames = new Map<string, string>((branchesR.data ?? []).map((row: any) => [row.id, row.name] as const));
   const byBranch = new Map<string, any>();
   const add = (id: string, key: string, value: number) => {
     if (!byBranch.has(id)) byBranch.set(id, { branchId: id, branchName: branchNames.get(id) ?? "—", invoiced: 0, collected: 0, expenses: 0, purchasesPaid: 0, payrollPaid: 0 });
