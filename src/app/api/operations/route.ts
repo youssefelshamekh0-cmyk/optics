@@ -86,6 +86,7 @@ export async function GET(request: Request) {
 
 const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("delivery"),saleId:uuid,status:z.enum(["pending","processing","ready","delivered"]),notes:z.string().max(500).default("")}),
+ z.object({action:z.literal("deliverAndCollect"),saleId:uuid}),
  z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
  z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().max(300).default("")}),
  z.object({action:z.literal("cashAccount"),branchId:uuid,name:z.string().trim().min(2).max(120),accountType:z.enum(["cash","bank","digital"]),paymentMethod:z.enum(["cash","card","instapay","other"]),openingBalance:z.number().min(0).max(100000000)}),
@@ -103,11 +104,14 @@ const actionSchema=z.discriminatedUnion("action",[
 
 export async function POST(request:Request){
  const parsed=actionSchema.safeParse(await request.json().catch(()=>null)); if(!parsed.success)return Response.json({error:"راجع البيانات المدخلة"},{status:400});
- const {action}=parsed.data; const permission=action==="delivery"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
+ const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId="";
- if(action==="delivery"){
+ if(action==="deliverAndCollect"){
+   const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+   const {data,error}=await admin.rpc("deliver_sale_and_collect_balance",{p_sale_id:parsed.data.saleId,p_actor:user!.id}); if(error){if(String(error.message).includes("cash account not configured"))return Response.json({error:"لا توجد خزنة نقدية نشطة لهذا الفرع لتسجيل المتبقي."},{status:409});if(String(error.message).includes("already delivered"))return Response.json({error:"الفاتورة تم تسليمها بالفعل."},{status:409});throw error;} entityId=parsed.data.saleId;
+ }else if(action==="delivery"){
    const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
    const {error}=await admin.rpc("change_sale_delivery",{p_sale_id:parsed.data.saleId,p_status:parsed.data.status,p_actor:user!.id,p_notes:parsed.data.notes}); if(error)throw error; entityId=parsed.data.saleId;
  }else if(action==="adjust"){
