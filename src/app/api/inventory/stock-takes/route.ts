@@ -48,6 +48,7 @@ export async function POST(request: Request) {
     p_actor: user!.id, p_counts: parsed.data.counts, p_notes: parsed.data.notes,
   });
   if (error?.message.includes("stock row missing")) return Response.json({ error: "أحد الأصناف لا يحتوي على سجل مخزون في هذا الفرع؛ حدّث القائمة وأعد الجرد." }, { status: 409 });
+  if (error?.message.includes("stock take branch inactive")) return Response.json({ error: "لا يمكن إجراء جرد لفرع غير نشط" }, { status: 409 });
   if (error?.message.includes("operation id conflict")) return Response.json({ error: "معرّف عملية الجرد مستخدم لفرع أو مستخدم مختلف" }, { status: 409 });
   if (error?.message.includes("duplicate product")) return Response.json({ error: "يوجد صنف مكرر في قائمة الجرد" }, { status: 400 });
   if (error) throw error;
