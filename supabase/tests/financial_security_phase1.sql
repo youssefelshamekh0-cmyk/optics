@@ -13,9 +13,9 @@ declare
 begin
  select u.id,p.id into v_actor,v_profile
  from auth.users u join public.user_profiles p on p.id=u.id
- where p.status='active' order by p.created_at limit 1;
+ where p.status='active' limit 1;
  if v_actor is null then raise exception 'TEST FIXTURE MISSING: need one active auth user/profile'; end if;
- select id into v_branch from public.branches order by created_at limit 1;
+ select id into v_branch from public.branches limit 1;
  if v_branch is null then raise exception 'TEST FIXTURE MISSING: need one branch'; end if;
  select id into v_central from public.cash_accounts where is_central and active limit 1;
  if v_central is null then raise exception 'TEST FIXTURE MISSING: need an active central cash account'; end if;
