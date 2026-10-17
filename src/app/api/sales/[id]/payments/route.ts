@@ -19,11 +19,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (lookupError) throw lookupError;
   if (!sale) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
   if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
-  const { data, error } = await admin.rpc("record_sale_payment", {
+  const { data, error } = await admin.rpc("record_sale_payment_idempotent", {
     p_sale_id: id, p_amount: amount, p_payment_method: parsed.data.paymentMethod,
-    p_received_by: user!.id, p_notes: parsed.data.notes,
+    p_received_by: user!.id, p_notes: parsed.data.notes, p_operation_id: parsed.data.operationId,
   });
-  if (error) return Response.json({ error: "تعذر تسجيل الدفعة؛ قد يكون المبلغ أكبر من المتبقي" }, { status: 400 });
+  if (error?.message.includes("idempotency key conflict")) return Response.json({ error: "معرّف الدفعة مستخدم لبيانات مختلفة؛ راجع سجل الفاتورة قبل إعادة المحاولة" }, { status: 409 });
+  if (error?.message.includes("cash account not configured")) return Response.json({ error: "لا يوجد حساب نشط لطريقة الدفع في فرع الفاتورة" }, { status: 409 });
+  if (error?.message.includes("payment exceeds remaining balance")) return Response.json({ error: "مبلغ الدفعة أكبر من المتبقي على الفاتورة" }, { status: 409 });
+  if (error) return Response.json({ error: "تعذر تسجيل الدفعة؛ راجع المبلغ والحساب" }, { status: 400 });
   await audit(user!.id, "sale.payment.record", "sale", id, { amount, paymentMethod: parsed.data.paymentMethod, operationId: parsed.data.operationId });
   return Response.json({ paymentId: data }, { status: 201 });
 }
