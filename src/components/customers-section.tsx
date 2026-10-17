@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeEgyptianPhone } from "@/lib/phone";
+import { cachedRequestJson } from "@/lib/offline-sync";
 
 type Customer = {
   id: string; full_name: string; phone: string | null; email: string | null;
@@ -11,10 +12,7 @@ type Draft = { name: string; phone: string; email: string; notes: string };
 const emptyDraft: Draft = { name: "", phone: "", email: "", notes: "" };
 
 async function requestJson(url: string, init?: RequestInit) {
-  const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
-  return data;
+  return cachedRequestJson<any>(url, init);
 }
 
 export default function CustomersSection({ canManage }: { canManage: boolean }) {
@@ -69,9 +67,12 @@ export default function CustomersSection({ canManage }: { canManage: boolean }) 
     setBusy(true); setError(""); setNotice("");
     try {
       if (editingId) await requestJson(`/api/customers/${editingId}`, { method: "PATCH", body: JSON.stringify(draft) });
-      else await requestJson("/api/customers", { method: "POST", body: JSON.stringify(draft) });
+      else {
+        const result = await requestJson("/api/customers", { method: "POST", body: JSON.stringify(draft) });
+        setNotice(result.queued ? "تم حفظ العميل محليًا؛ سيُرسل للخادم عند عودة الإنترنت." : "تمت إضافة العميل");
+      }
       setDraft(emptyDraft); setEditingId(null); setPhoneLookup("");
-      setNotice(editingId ? "تم تحديث بيانات العميل" : "تمت إضافة العميل");
+      if (editingId) setNotice("تم تحديث بيانات العميل");
       window.dispatchEvent(new Event("customers:changed"));
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر حفظ العميل"); }
