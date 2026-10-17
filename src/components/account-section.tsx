@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
 import { hoursLabel } from "@/components/shift-panel";
 
 type Payroll = { id: string; period_start: string; period_end: string; base_salary: number; commission_amount: number; deductions: number; amount_paid: number; status: string };
@@ -15,6 +15,52 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
   const [data, setData] = useState<Account | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
+  const [brandLogo, setBrandLogo] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoNotice, setLogoNotice] = useState("");
+  const [logoError, setLogoError] = useState("");
+  useEffect(() => {
+    if (!isOwner) return;
+    fetch("/api/brand-settings", { cache: "no-store" }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "تعذر تحميل شعار البراند");
+      setBrandLogo(j.logoDataUrl ?? null);
+    }).catch((e) => setLogoError(e instanceof Error ? e.message : "تعذر تحميل شعار البراند"));
+  }, [isOwner]);
+
+  async function uploadBrandLogo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setLogoError(""); setLogoNotice("");
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setLogoError("اختار صورة PNG أو JPG أو WebP."); return; }
+    if (file.size > 1024 * 1024) { setLogoError("حجم الشعار يجب ألا يتجاوز 1 ميجابايت."); return; }
+    setLogoBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("تعذر قراءة الصورة"));
+        reader.onerror = () => reject(new Error("تعذر قراءة الصورة"));
+        reader.readAsDataURL(file);
+      });
+      const r = await fetch("/api/brand-settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ logoDataUrl: dataUrl }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "تعذر حفظ الشعار");
+      setBrandLogo(j.logoDataUrl ?? dataUrl); setLogoNotice("تم حفظ شعار البراند، وسيظهر في الفواتير والتقارير المطبوعة.");
+    } catch (e) { setLogoError(e instanceof Error ? e.message : "تعذر حفظ الشعار"); }
+    finally { setLogoBusy(false); }
+  }
+
+  async function removeBrandLogo() {
+    setLogoBusy(true); setLogoError(""); setLogoNotice("");
+    try {
+      const r = await fetch("/api/brand-settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ remove: true }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "تعذر حذف الشعار");
+      setBrandLogo(null); setLogoNotice("تم حذف شعار البراند.");
+    } catch (e) { setLogoError(e instanceof Error ? e.message : "تعذر حذف الشعار"); }
+    finally { setLogoBusy(false); }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +96,25 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
         {error && <div className="wide notice error" role="alert">{error}</div>}{notice && <div className="wide notice success" role="status">{notice}</div>}
         <button className="primary" disabled={busy}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
       </form></section>
+
+    {isOwner && <section className="panel form-panel">
+      <div className="section-heading"><div><p className="eyebrow">هوية البراند</p><h2>شعار الفواتير والتقارير</h2></div><span className="soft-icon">✦</span></div>
+      <p className="muted">ارفع شعار البراند ليظهر تلقائيًا في الفواتير وقوائم التسليم المطبوعة. الصيغ المدعومة PNG وJPG وWebP، بحد أقصى 1 ميجابايت.</p>
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", margin: "18px 0" }}>
+        <div style={{ width: 148, height: 100, border: "1px dashed var(--line, #cbd8d2)", borderRadius: 12, display: "grid", placeItems: "center", padding: 10, background: "var(--surface, #f8faf9)" }}>
+          {brandLogo ? <img src={brandLogo} alt="شعار البراند الحالي" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /> : <span className="footnote">لا يوجد شعار مرفوع</span>}
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <label className="primary" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: logoBusy ? "wait" : "pointer", opacity: logoBusy ? .65 : 1 }}>
+            {logoBusy ? "جارٍ الحفظ…" : brandLogo ? "تغيير الشعار" : "رفع شعار"}
+            <input type="file" accept="image/png,image/jpeg,image/webp" disabled={logoBusy} onChange={uploadBrandLogo} style={{ display: "none" }} />
+          </label>
+          {brandLogo && <button type="button" className="row-action" disabled={logoBusy} onClick={() => void removeBrandLogo()}>حذف الشعار</button>}
+        </div>
+      </div>
+      {logoError && <p className="notice error" role="alert">{logoError}</p>}
+      {logoNotice && <p className="notice success" role="status">{logoNotice}</p>}
+    </section>}
     {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2>{s && s.branches.length > 0 && <p className="footnote">الفروع: {s.branches.join("، ")}</p>}</div>{s && <span className="count-badge">{s.jobTitle}</span>}</div>
       {!data ? <p className="footnote">جارٍ التحميل…</p> : !s ? <p className="footnote">لم يُسجَّل لك مرتب بعد. اطلب من المالك ربط حسابك بسجل موظف.</p> : <>
         <div className="account-kpis">
