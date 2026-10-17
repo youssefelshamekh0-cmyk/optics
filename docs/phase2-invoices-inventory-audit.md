@@ -1,6 +1,6 @@
 # Phase 2 — Invoices & Inventory Audit
 
-Status: investigation only. No production database writes, no production deployment changes, and no merge to main.
+Status: source changes committed to the isolated phase2 branch; not tested, not deployed, no production database writes, and no merge to main.
 
 ## Scope
 - Invoice totals, discounts, paid amount, and outstanding balance
@@ -16,7 +16,7 @@ The connected Supabase account currently lists only one project: `optics system`
 2. Invoice balances should satisfy: `grand_total = total_amount - discount_amount`, `paid_amount = SUM(sale_payments.amount)`, and `remaining = grand_total - paid_amount`. A negative remaining balance must be reported as an invariant violation, not hidden by clamping it to zero.
 3. `record_sale_payment` locks the sale row before summing prior payments and checking remaining balance. This is a promising concurrency guard, but needs staging tests for simultaneous payments and duplicate submissions.
 4. Inventory transfer logic is implemented in the operations finance/HR migration. Test source/destination locking, absent destination stock row, insufficient stock, and rollback if any movement insert fails.
-5. Repository search did not identify a complete return/refund flow. The presence of a `return` stock movement type alone does not implement a safe return workflow.
+5. Added a staged return/refund migration and API endpoint on this branch. It locks the invoice and sale-item rows, limits returned quantity to sold quantity, limits refunds to net paid amounts, restores product stock, and writes a cash-out ledger entry. It has not been run; review schema/constraint compatibility and test it on staging before applying.
 
 ## Required staging test matrix
 - Invoice: exact total, allowed discount, discount larger than subtotal, zero/negative payment, payment equal to balance, payment exceeding balance.
