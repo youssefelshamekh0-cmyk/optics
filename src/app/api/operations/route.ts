@@ -245,6 +245,16 @@ export async function POST(request:Request){
    }
    const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive"?{result:actionResult}:{});
+ const auditMetadata:Record<string,unknown>={};
+ if(action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive")auditMetadata.result=actionResult;
+ if(action==="adjust")Object.assign(auditMetadata,{operationId:parsed.data.operationId,branchId:parsed.data.branchId,productId:parsed.data.productId,quantityDelta:parsed.data.delta,reason:parsed.data.reason});
+ if(action==="transfer")Object.assign(auditMetadata,{operationId:parsed.data.operationId,sourceBranchId:parsed.data.sourceBranchId,destinationBranchId:parsed.data.destinationBranchId,productId:parsed.data.productId,quantity:parsed.data.quantity,reason:parsed.data.reason});
+ if(action==="transferReceive")auditMetadata.transferId=parsed.data.transferId;
+ if(action==="cashReconcile")Object.assign(auditMetadata,{operationId:parsed.data.operationId,cashAccountId:parsed.data.cashAccountId,countedBalance:parsed.data.countedBalance});
+ if(action==="expense")Object.assign(auditMetadata,{operationId:parsed.data.operationId,branchId:parsed.data.branchId,cashAccountId:parsed.data.cashAccountId,amount:parsed.data.amount,fromCentral:parsed.data.fromCentral});
+ if(action==="purchase")Object.assign(auditMetadata,{branchId:parsed.data.branchId,invoiceNumber:parsed.data.invoiceNumber,cashAccountId:parsed.data.cashAccountId??null,paidAmount:parsed.data.paidAmount});
+ if(action==="payrollPay")Object.assign(auditMetadata,{operationId:parsed.data.operationId,payrollId:parsed.data.payrollId,cashAccountId:parsed.data.cashAccountId,amount:parsed.data.amount});
+ if(action==="deliverAndCollect")Object.assign(auditMetadata,{saleId:parsed.data.saleId,cashAccountId:parsed.data.cashAccountId??null,discountAmount:parsed.data.discountAmount});
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,auditMetadata);
  return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
 }
