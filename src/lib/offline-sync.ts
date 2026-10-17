@@ -194,7 +194,16 @@ export async function syncPendingOperations(): Promise<void> {
   syncing = true;
   try {
     const operations = (await getActorOutbox()).filter(operation => operation.status === "pending");
-    for (const operation of operations) {
+    for (const queued of operations) {
+      const operation = (await getActorOutbox()).find(item => item.id === queued.id);
+      if (!operation || operation.status !== "pending") continue;
+      if (operation.type === "sale.create" && typeof operation.payload.customerId === "string") {
+        const unresolvedCustomer = (await getActorOutbox()).find(item => item.type === "customer.create" && item.localCustomerId === operation.payload.customerId && item.status !== "synced");
+        if (unresolvedCustomer) {
+          await putOperation({ ...operation, message: "الفاتورة تنتظر مزامنة العميل أولًا.", updatedAt: Date.now() });
+          continue;
+        }
+      }
       const started = { ...operation, status: "syncing" as const, updatedAt: Date.now() };
       await putOperation(started);
       notify();
