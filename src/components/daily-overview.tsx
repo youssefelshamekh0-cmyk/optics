@@ -10,13 +10,15 @@ type Daily = {
   accounts: { id: string; name: string; branch: string; payment_method: string; balance: number; in_today: number; out_today: number }[];
   expenses: { id: string; branch: string; description: string; category: string; amount: number }[];
   shifts: { id: string; user: string; branch: string; opened_at: string; closed_at: string | null; status: "open" | "closed"; opening_cash: number; closing_cash: number | null; variance: number | null }[];
-  monthHours: { user_id: string; name: string; seconds: number; shifts: number }[];
+  weekHours: { user_id: string; name: string; seconds: number; shifts: number }[];
+  weekStart: string; weekEnd: string;
 };
 const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
 const statusLabel: Record<string, string> = { pending: "جديد", processing: "قيد التجهيز", ready: "جاهز", delivered: "تم التسليم", cancelled: "ملغي" };
 const methodLabel: Record<string, string> = { cash: "نقدي", card: "بطاقة", instapay: "إنستاباي", other: "أخرى" };
 const time = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-const shiftDate = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+const weekLabel = (d: string) => new Intl.DateTimeFormat("ar-EG", { day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
+const shiftDate =(date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 export default function DailyOverview() {
   const [data, setData] = useState<Daily | null>(null);
@@ -24,6 +26,7 @@ export default function DailyOverview() {
   const [date, setDate] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async (quiet = false) => {
@@ -76,8 +79,13 @@ export default function DailyOverview() {
       </tbody></table></div>
 
       {owner && <>
-        <h3 className="ops-subtitle">حسابات الفرع (الخزن وطرق الدفع)</h3>
-        {data.accounts.length ? <div className="ops-account-grid">{data.accounts.map((a) => <article className="ops-account" key={a.id}><small>{a.branch} · {methodLabel[a.payment_method] ?? a.payment_method}</small><strong>{a.name}</strong><b>{money(a.balance)}</b><small>اليوم: ↓ {money(a.in_today)} · ↑ {money(a.out_today)}</small></article>)}</div> : <p className="footnote">لا توجد خزن نشطة لهذا الاختيار.</p>}
+        <div className="accounts-toggle">
+          <button type="button" className="row-action" aria-expanded={showAccounts} aria-controls="branch-accounts" onClick={() => setShowAccounts((v) => !v)}>{showAccounts ? "إخفاء حسابات الفرع" : "عرض حسابات الفرع (الخزن وطرق الدفع)"}</button>
+        </div>
+        {showAccounts && <div id="branch-accounts">
+          <h3 className="ops-subtitle">حسابات الفرع (الخزن وطرق الدفع)</h3>
+          {data.accounts.length ? <div className="ops-account-grid">{data.accounts.map((a) => <article className="ops-account" key={a.id}><small>{a.branch} · {methodLabel[a.payment_method] ?? a.payment_method}</small><strong>{a.name}</strong><b>{money(a.balance)}</b><small>اليوم: ↓ {money(a.in_today)} · ↑ {money(a.out_today)}</small></article>)}</div> : <p className="footnote">لا توجد خزن نشطة لهذا الاختيار.</p>}
+        </div>}
         {data.expenses.length > 0 && <><h3 className="ops-subtitle">مصروفات اليوم</h3><div className="table-wrap"><table><thead><tr><th>الفرع</th><th>البيان</th><th>البند</th><th>القيمة</th></tr></thead><tbody>{data.expenses.map((x) => <tr key={x.id}><td>{x.branch}</td><td>{x.description}</td><td>{x.category}</td><td>{money(x.amount)}</td></tr>)}</tbody></table></div></>}
       </>}
 
@@ -87,7 +95,7 @@ export default function DailyOverview() {
         {data.shifts.length === 0 && <tr><td colSpan={owner ? 8 : 7} className="table-empty">لا توجد ورديات في هذا اليوم.</td></tr>}
       </tbody></table></div>
 
-      {owner && data.monthHours.length > 0 && <><h3 className="ops-subtitle">إجمالي ساعات العمل هذا الشهر</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>عدد الورديات</th><th>إجمالي الساعات</th></tr></thead><tbody>{data.monthHours.map((m) => <tr key={m.user_id}><td>{m.name}</td><td>{m.shifts}</td><td><strong>{hoursLabel(m.seconds * 1000)}</strong></td></tr>)}</tbody></table></div></>}
+      {owner && data.weekHours.length > 0 && <><h3 className="ops-subtitle">إجمالي ساعات العمل الأسبوع ({weekLabel(data.weekStart)} – {weekLabel(data.weekEnd)})</h3><div className="table-wrap"><table><thead><tr><th>الموظف</th><th>عدد الورديات</th><th>إجمالي الساعات</th></tr></thead><tbody>{data.weekHours.map((m) => <tr key={m.user_id}><td>{m.name}</td><td>{m.shifts}</td><td><strong>{hoursLabel(m.seconds * 1000)}</strong></td></tr>)}</tbody></table></div></>}
     </section>
   );
 }

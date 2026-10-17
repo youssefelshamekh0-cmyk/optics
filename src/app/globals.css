@@ -40,3 +40,21 @@ button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:line-through}
 .daily-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.daily-controls label{display:grid;gap:4px;font-size:10px;color:var(--muted)}.daily-controls select,.daily-date input{min-height:36px;border:1px solid #dfe6e1;border-radius:9px;padding:5px 10px;background:#fbfcfb;font-size:11px}.daily-date{display:flex;gap:6px;align-items:center}
 @media(max-width:860px){.shift-running{grid-template-columns:1fr}.lens-new{grid-template-columns:1fr}.shift-timer strong{font-size:32px}.daily-controls{width:100%}.daily-controls label{flex:1 1 140px}}
+
+.brand-logo{display:block;border-radius:22%;box-shadow:0 7px 18px #27685f30;flex:none}
+.brand .brand-logo{margin-inline-end:0}
+.login-logo{margin-bottom:24px}
+.user-pill-button{background:none;border:0;padding:5px 9px;border-radius:12px;color:inherit;text-align:right;cursor:pointer}
+.user-pill-button:hover,.user-pill-button.selected{background:var(--mint)}
+.accounts-toggle{margin:16px 0 4px}
+.account-panel .ops-forms{margin-top:14px}
+.req-company{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+.req-company button{border:1px solid var(--line);background:#fff;border-radius:20px;padding:8px 13px;font-size:11px;color:#53605c}
+.req-company button.on{background:var(--green);border-color:var(--green);color:#fff}
+.req-company button b{margin-inline-start:6px;background:var(--mint);color:var(--green);border-radius:20px;padding:1px 7px;font-size:10px}
+.req-company button.on b{background:#ffffff30;color:#fff}
+.req-table td input[type=number]{width:110px;height:34px;border:1px solid #e2e8e3;border-radius:8px;padding:0 8px}
+.req-table td.rx{font-size:10px;line-height:1.7;direction:ltr;text-align:right}
+.req-table tr.picked{background:#f1f8f4}
+.req-summary{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:10px 0}
+@media(max-width:560px){.brand .brand-logo{width:34px!important;height:34px!important}.user-pill-button{padding:3px 5px}}

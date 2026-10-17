@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUser, requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { addDays, weekStart } from "@/lib/week";
 
 const uuid = z.string().uuid();
 function branchAllowed(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>, branchId: string) { return user.roles.includes("super_admin") || user.branchIds.includes(branchId); }
@@ -58,7 +59,11 @@ export async function GET(request: Request) {
     if(branchId)employees=employees.eq("branch_id",branchId); else if(!user!.roles.includes("super_admin"))employees=employees.in("branch_id",user!.branchIds);
     const {data,error}=await employees; if(error)throw error;
     const ids:string[]=(data??[]).map((x:any)=>x.id); const payroll=ids.length?await admin.from("payroll_entries").select("id,employee_id,period_start,period_end,base_salary,commission_amount,deductions,amount_paid,status,notes").in("employee_id",ids).order("created_at",{ascending:false}).limit(100):{data:[],error:null};
-    if(payroll.error)throw payroll.error; let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("active",true); if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds); const [a,users]=await Promise.all([accounts.order("name"),admin.from("user_profiles").select("id,full_name,phone,user_roles(roles(key))").eq("status","active").order("full_name")]); if(a.error||users.error)throw a.error??users.error; return Response.json({employees:data??[],payroll:payroll.data??[],accounts:a.data??[],users:users.data??[],branches:(await admin.from("branches").select("id,name,code,status").order("name")).data??[]});
+    if(payroll.error)throw payroll.error;
+    let leaves=admin.from("leave_requests").select("id,user_id,branch_id,request_type,start_date,end_date,start_time,end_time,reason,status,decision_note,created_at,user_profiles(full_name,phone),branches(name)").order("created_at",{ascending:false}).limit(100);
+    if(branchId)leaves=leaves.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))leaves=leaves.in("branch_id",user!.branchIds);
+    const leaveRows=await leaves;if(leaveRows.error)throw leaveRows.error;
+    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("active",true); if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds); const [a,users]=await Promise.all([accounts.order("name"),admin.from("user_profiles").select("id,full_name,phone,user_roles(roles(key))").eq("status","active").order("full_name")]); if(a.error||users.error)throw a.error??users.error; return Response.json({employees:data??[],payroll:payroll.data??[],leaves:leaveRows.data??[],accounts:a.data??[],users:users.data??[],branches:(await admin.from("branches").select("id,name,code,status").order("name")).data??[]});
   }
   if(module==="purchases") {
     let q=admin.from("purchases").select("id,invoice_number,supplier_id,branch_id,purchased_at,total_cost,amount_paid,status,notes,suppliers(name,phone),branches(name)").order("purchased_at",{ascending:false}).limit(100);
@@ -81,13 +86,14 @@ const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("advanceDecision"),requestId:uuid,decision:z.enum(["pay","reject"]),cashAccountId:uuid.nullable().optional()}),
  z.object({action:z.literal("employee"),id:uuid.optional(),branchId:uuid,userId:uuid.nullable().optional(),name:z.string().trim().min(2).max(160),phone:z.string().max(40).default(""),jobTitle:z.string().trim().min(2).max(100),baseSalary:z.number().min(0).max(10000000),commissionRate:z.number().min(0).max(100)}),
  z.object({action:z.literal("payrollCreate"),employeeId:uuid,periodStart:z.string().date(),periodEnd:z.string().date(),deductions:z.number().min(0),notes:z.string().max(500).default("")}),
+ z.object({action:z.literal("leaveDecision"),requestId:uuid,decision:z.enum(["approve","reject"]),note:z.string().max(500).default("")}),
  z.object({action:z.literal("payrollPay"),payrollId:uuid,cashAccountId:uuid,amount:z.number().positive()}),
  z.object({action:z.literal("purchase"),invoiceNumber:z.string().trim().min(1).max(100),supplierName:z.string().trim().min(2).max(160),supplierPhone:z.string().max(40).default(""),branchId:uuid,items:z.array(z.object({productId:uuid,quantity:z.number().int().min(1),unitCost:z.number().min(0)})).min(1).max(100),paidAmount:z.number().min(0),cashAccountId:uuid.nullable().optional()}),
 ]);
 
 export async function POST(request:Request){
  const parsed=actionSchema.safeParse(await request.json().catch(()=>null)); if(!parsed.success)return Response.json({error:"راجع البيانات المدخلة"},{status:400});
- const {action}=parsed.data; const permission=action==="delivery"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
+ const {action}=parsed.data; const permission=action==="delivery"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action==="leaveDecision"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId="";
@@ -111,9 +117,15 @@ export async function POST(request:Request){
    const q=parsed.data.id?admin.from("employees").update(row).eq("id",parsed.data.id).select("id").single():admin.from("employees").insert(row).select("id").single(); const {data,error}=await q;if(error)throw error;entityId=data.id;
  }else if(action==="payrollCreate"){
    if(parsed.data.periodEnd<parsed.data.periodStart)return Response.json({error:"نهاية الفترة قبل بدايتها"},{status:400});
+   if(weekStart(parsed.data.periodStart)!==parsed.data.periodStart||parsed.data.periodEnd!==addDays(parsed.data.periodStart,6))return Response.json({error:"كشف الراتب أسبوعي: من السبت إلى الجمعة"},{status:400});
    const {data:employee,error:e}=await admin.from("employees").select("id,branch_id,user_id,base_salary,commission_rate").eq("id",parsed.data.employeeId).maybeSingle();if(e)throw e;if(!employee)return Response.json({error:"الموظف غير موجود"},{status:404});if(!branchAllowed(user!,employee.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
    let commission=0;if(employee.user_id&&Number(employee.commission_rate)>0){const sales=await admin.from("sales").select("grand_total").eq("created_by",employee.user_id).eq("branch_id",employee.branch_id).gte("created_at",parsed.data.periodStart).lte("created_at",parsed.data.periodEnd+"T23:59:59.999Z").neq("delivery_status","cancelled");if(sales.error)throw sales.error;commission=(sales.data??[]).reduce((s:number,x:any)=>s+Number(x.grand_total),0)*Number(employee.commission_rate)/100;}
    const {data,error}=await admin.from("payroll_entries").insert({employee_id:employee.id,period_start:parsed.data.periodStart,period_end:parsed.data.periodEnd,base_salary:employee.base_salary,commission_amount:commission,deductions:parsed.data.deductions,created_by:user!.id,notes:parsed.data.notes||null}).select("id").single();if(error)throw error;entityId=data.id;
+ }else if(action==="leaveDecision"){
+   const found=await admin.from("leave_requests").select("id,branch_id,status").eq("id",parsed.data.requestId).maybeSingle();if(found.error)throw found.error;if(!found.data)return Response.json({error:"الطلب غير موجود"},{status:404});
+   if(!(user!.roles.includes("super_admin")||(found.data.branch_id&&user!.branchIds.includes(found.data.branch_id))))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+   const {data,error}=await admin.from("leave_requests").update({status:parsed.data.decision==="approve"?"approved":"rejected",decided_by:user!.id,decided_at:new Date().toISOString(),decision_note:parsed.data.note||null}).eq("id",parsed.data.requestId).eq("status","pending").select("id");if(error)throw error;
+   if(!data?.length)return Response.json({error:"تم البت في هذا الطلب مسبقًا"},{status:409});entityId=parsed.data.requestId;
  }else if(action==="payrollPay"){
    const {data,error}=await admin.rpc("pay_payroll",{p_payroll:parsed.data.payrollId,p_account:parsed.data.cashAccountId,p_amount:parsed.data.amount,p_actor:user!.id});if(error)throw error;entityId=parsed.data.payrollId;
  }else if(action==="purchase"){

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { todayCairo, weekRange } from "@/lib/week";
 
 type Shift = { id: string; branch_id: string; cash_account_id: string; opening_cash: number; closing_cash?: number | null; status: "open" | "closed"; opened_at: string; closed_at?: string | null; branches?: { name: string } | null; cash_accounts?: { name: string } | null };
 type Account = { id: string; branch_id: string; name: string };
@@ -67,14 +68,14 @@ export default function ShiftPanel() {
 
   if (!data || data.owner) return null;
   const account = data.accounts.find((a) => a.id === accountId);
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const monthMs = data.shifts.filter((s) => s.opened_at.slice(0, 7) === monthKey).reduce((sum, s) => sum + durationOf(s, now), 0);
+  const week = weekRange(todayCairo());
+  const weekMs = data.shifts.filter((s) => { const t = new Date(s.opened_at).getTime(); return t >= week.from.getTime() && t < week.to.getTime(); }).reduce((sum, s) => sum + durationOf(s, now), 0);
   const history = data.shifts.filter((s) => s.status === "closed").slice(0, 10);
 
   return (
     <section className="panel shift-panel">
       <div className="section-heading"><div><p className="eyebrow">اليومية</p><h2>{open ? "يوم عمل جارٍ" : "لا توجد وردية مفتوحة"}</h2></div>
-        {monthMs > 0 && <span className="count-badge" title="آخر 20 وردية">ساعات هذا الشهر: {hoursLabel(monthMs)}</span>}</div>
+        {weekMs > 0 && <span className="count-badge" title="من السبت إلى الجمعة">ساعات هذا الأسبوع: {hoursLabel(weekMs)}</span>}</div>
       {error && <p className="notice error" role="alert">{error}</p>}
       {message && <p className="notice success" role="status">{message}</p>}
       {open ? (
