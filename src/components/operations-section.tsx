@@ -8,6 +8,35 @@ async function api(url:string,init?:RequestInit){const r=await fetch(url,{...ini
 export default function OperationsSection({module,branches,branchIds,isOwner}:{module:Module;branches:Branch[];branchIds:string[];isOwner:boolean}){
  const available=useMemo(()=>branches.filter(b=>b.status==="ACTIVE"&&(isOwner||branchIds.includes(b.id))),[branches,branchIds,isOwner]);
  const [branchId,setBranchId]=useState("");const [data,setData]=useState<Record<string,any>>({});const [error,setError]=useState("");const [notice,setNotice]=useState("");const [busy,setBusy]=useState(false);const [search,setSearch]=useState("");
+ const [reportType,setReportType]=useState<"weekly"|"monthly"|"statement">("weekly");
+ const [reportEmployeeId,setReportEmployeeId]=useState("");
+ const [reportFrom,setReportFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-((d.getDay()+1)%7));return d.toISOString().slice(0,10)});
+ const [reportTo,setReportTo]=useState(()=>{const d=new Date();return d.toISOString().slice(0,10)});
+ const [reportData,setReportData]=useState<{employees:any[];payroll:any[]}|null>(null);
+ const [reportBusy,setReportBusy]=useState(false);
+ const [reportError,setReportError]=useState("");
+ async function loadStaffReport() {
+   setReportBusy(true); setReportError(""); setReportData(null);
+   try {
+     const params=new URLSearchParams({from:reportFrom,to:reportTo});
+     if(reportEmployeeId)params.set("employeeId",reportEmployeeId);
+     if(branchId)params.set("branchId",branchId);
+     const result=await api("/api/staff-reports?"+params.toString());
+     setReportData(result);
+   } catch(e) { setReportError(e instanceof Error?e.message:"تعذر استخراج التقرير"); }
+   finally { setReportBusy(false); }
+ }
+ function printStaffReport() {
+   if(!reportData)return;
+   const esc=(v:unknown)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
+   const moneyText=(n:number)=>money(n);
+   const employeesById=new Map(reportData.employees.map((e:any)=>[e.id,e]));
+   const rows=reportData.payroll.map((p:any)=>{const e=employeesById.get(p.employee_id);return `<tr><td>${esc(e?.full_name)}</td><td>${esc(p.period_start)} – ${esc(p.period_end)}</td><td>${moneyText(p.base_salary)}</td><td>${moneyText(p.commission_amount)}</td><td>${moneyText(p.deductions)}</td><td>${moneyText(p.net)}</td><td>${moneyText(p.amount_paid)}</td><td>${moneyText(p.remaining)}</td></tr>`;}).join("");
+   const w=window.open("","_blank","noopener,noreferrer");
+   if(!w){setReportError("اسمح بفتح نافذة الطباعة لهذا الموقع ثم حاول مرة أخرى.");return;}
+   w.document.write(`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>تقرير الموظفين</title><style>body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#23342f}h1{color:#24685d}p{color:#66746e}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #d7e2dc;padding:8px;text-align:right}th{background:#edf4f0;color:#225c52}tfoot{font-weight:bold}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0}}</style><h1>${esc(reportType==="statement"?"كشف حساب موظف":reportType==="monthly"?"التقرير الشهري للموظفين":"التقرير الأسبوعي للموظفين")}</h1><p>الفترة: ${esc(reportFrom)} — ${esc(reportTo)}</p><table><thead><tr><th>الموظف</th><th>الفترة</th><th>الأساسي</th><th>العمولة</th><th>الخصومات</th><th>صافي المستحق</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>${rows||'<tr><td colspan="8">لا توجد بيانات للفترة المحددة</td></tr>'}</tbody></table><script>window.onload=()=>window.print()<\/script></html>`);
+   w.document.close();
+ }
  const [adjust,setAdjust]=useState({productId:"",delta:"",reason:""});const [transfer,setTransfer]=useState({destinationBranchId:"",productId:"",quantity:"1",reason:""});
  const [purchase,setPurchase]=useState({invoiceNumber:"",supplierName:"",supplierPhone:"",productId:"",quantity:"1",unitCost:"",paidAmount:"0",cashAccountId:""});
  const [cash,setCash]=useState({name:"",accountType:"cash",paymentMethod:"cash",openingBalance:"0"});const [expense,setExpense]=useState({description:"",category:"تشغيل",amount:"",cashAccountId:"",fromCentral:false,operationId:""});
