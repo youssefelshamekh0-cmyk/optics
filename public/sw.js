@@ -35,6 +35,9 @@ self.addEventListener("fetch", (event) => {
       if (response.ok && !response.redirected && new URL(response.url).pathname === "/dashboard") {
         const cache = await caches.open(PRIVATE_CACHE);
         await cache.put(PRIVATE_SHELL_KEY, response.clone());
+      } else if (response.redirected || new URL(response.url).pathname !== "/dashboard") {
+        // A login redirect means the previous private shell must not survive an expired session.
+        await caches.delete(PRIVATE_CACHE);
       }
       return response;
     }).catch(async () => {
