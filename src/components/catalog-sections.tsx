@@ -53,10 +53,10 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
     if (!window.confirm("سيتم اعتماد الكميات الفعلية وتسجيل فروق الجرد كحركات تسوية غير قابلة للمحو. هل تريد المتابعة؟")) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      const result = await requestJson("/api/inventory/stock-takes", { method: "POST", body: JSON.stringify({ operationId: crypto.randomUUID(), branchId, notes: stockTakeNotes, counts }) });
+      const result = await requestJson("/api/inventory/stock-takes", { method: "POST", body: JSON.stringify({ operationId, branchId, notes: stockTakeNotes, counts }) });
       const detail = result.result ?? {};
       setNotice("تم اعتماد الجرد: " + String(detail.countedItems ?? counts.length) + " صنف، وتسوية " + String(detail.adjustedItems ?? 0) + " صنف.");
-      setStockTakeNotes(""); await refresh();
+      setStockTakeNotes(""); setStockTakeOperationId(""); await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر اعتماد الجرد"); } finally { setBusy(false); }
   }
   return <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">المنتجات والشنابر والعدسات</p><h2>الأصناف والمخزون</h2></div><span className="count-badge">{products.length} صنف</span></div>
@@ -71,8 +71,8 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
     <section className="catalog-form" style={{ marginTop: 18 }}>
       <div className="section-heading"><div><p className="eyebrow">مطابقة فعلية</p><h3>جرد مخزون الفرع</h3></div><span className="footnote">{products.filter(product => product.stock.exists).length} صنف له رصيد مسجل</span></div>
       <p className="footnote">أدخل الكمية التي تم عدّها فعليًا لكل صنف. عند الاعتماد تُحفظ الكمية المتوقعة والفعلية والفرق، وتُسجل التسويات في سجل حركة المخزون.</p>
-      <label>ملاحظات الجرد<input maxLength={500} value={stockTakeNotes} onChange={event => setStockTakeNotes(event.target.value)} placeholder="مثال: جرد نهاية الأسبوع" /></label>
-      <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الرصيد بالنظام</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{products.filter(product => product.stock.exists).map(product => { const counted = Number(countDrafts[product.id] ?? product.stock.quantity); return <tr key={product.id}><td>{product.name}</td><td>{product.stock.quantity}</td><td><input aria-label={"الكمية الفعلية لـ " + product.name} type="number" min="0" max="100000" step="1" value={countDrafts[product.id] ?? String(product.stock.quantity)} onChange={event => setCountDrafts(old => ({ ...old, [product.id]: event.target.value }))} style={{ width: 100 }} /></td><td>{Number.isInteger(counted) ? counted - product.stock.quantity : "—"}</td></tr>; })}{products.every(product => !product.stock.exists) && <tr><td colSpan={4} className="table-empty">لا توجد أصناف مسجلة في مخزون الفرع.</td></tr>}</tbody></table></div>
+      <label>ملاحظات الجرد<input maxLength={500} value={stockTakeNotes} onChange={event => { setStockTakeNotes(event.target.value); setStockTakeOperationId(""); }} placeholder="مثال: جرد نهاية الأسبوع" /></label>
+      <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الرصيد بالنظام</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{products.filter(product => product.stock.exists).map(product => { const counted = Number(countDrafts[product.id] ?? product.stock.quantity); return <tr key={product.id}><td>{product.name}</td><td>{product.stock.quantity}</td><td><input aria-label={"الكمية الفعلية لـ " + product.name} type="number" min="0" max="100000" step="1" value={countDrafts[product.id] ?? String(product.stock.quantity)} onChange={event => { setCountDrafts(old => ({ ...old, [product.id]: event.target.value })); setStockTakeOperationId(""); }} style={{ width: 100 }} /></td><td>{Number.isInteger(counted) ? counted - product.stock.quantity : "—"}</td></tr>; })}{products.every(product => !product.stock.exists) && <tr><td colSpan={4} className="table-empty">لا توجد أصناف مسجلة في مخزون الفرع.</td></tr>}</tbody></table></div>
       <button type="button" className="primary" disabled={busy || !products.some(product => product.stock.exists)} onClick={() => void submitStockTake()}>{busy ? "جارٍ الاعتماد…" : "اعتماد الجرد وتسجيل الفروق"}</button>
     </section>
     <p className="footnote">إضافة الصنف تسجل حركة رصيد بداية. التوريدات تسجل من تبويب «توريد العدسات»؛ بيع أصناف الكتالوج يخصم الكمية من رصيد الفرع بعد اعتماد الفاتورة.</p>
