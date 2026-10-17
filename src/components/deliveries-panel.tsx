@@ -44,7 +44,7 @@ function printSlip(s: Sale, logoDataUrl: string | null) {
   <h2>العميل</h2><table><tbody><tr><th>الاسم</th><td>${esc(s.customers?.full_name)}</td><th>الهاتف</th><td>${esc(s.customers?.phone)}</td></tr></tbody></table>
   <h2>البنود</h2><table><thead><tr><th>البند</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${items.map((i) => `<tr><td>${esc(i.item_name)}</td><td>${esc(i.quantity)}</td><td>${esc(money(Number(i.unit_price)))}</td><td>${esc(money(Number(i.line_total)))}</td></tr>`).join("") || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
   <div class="totals"><div>الإجمالي<b>${esc(money(Number(s.grand_total)))}</b></div><div>المدفوع<b>${esc(money(s.paid_amount))}</b></div><div class="due">المتبقي<b>${esc(money(s.due_amount))}</b></div></div>
-  ${s.notes ? `<h2>ملاحظات</h2><p>${esc(s.notes)}</p>` : ""}<div class="sign"><div>توقيع المستلم</div><div>توقيع الموظف</div></div>`, brandLogo);
+  ${s.notes ? `<h2>ملاحظات</h2><p>${esc(s.notes)}</p>` : ""}<div class="sign"><div>توقيع المستلم</div><div>توقيع الموظف</div></div>`, logoDataUrl);
 }
 
 export default function DeliveriesPanel({ branches, branchIds, isOwner }: { branches: Branch[]; branchIds: string[]; isOwner: boolean }) {
