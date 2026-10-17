@@ -21,7 +21,7 @@ set unit_cost =
         on l.branch_id=s.branch_id and l.id=nullif(si.technical_details->'left'->>'priceId','')::uuid
         where s.id=si.sale_id),0),
     unit_cost_is_estimated = true
-where si.product_id is null and si.item_kind='prescription_lens';
+where si.product_id is null and si.item_kind='prescription_lens' and si.unit_cost=0;
 
 create or replace function public.capture_sale_item_unit_cost()
 returns trigger
