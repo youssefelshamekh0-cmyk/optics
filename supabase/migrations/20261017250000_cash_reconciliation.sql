@@ -3,7 +3,6 @@ create table if not exists public.cash_reconciliations (
   id uuid primary key default gen_random_uuid(),
   operation_id uuid not null unique,
   cash_account_id uuid not null references public.cash_accounts(id) on delete restrict,
-  request_fingerprint text not null,
   expected_balance numeric(14,2) not null,
   counted_balance numeric(14,2) not null check (counted_balance >= 0),
   difference numeric(14,2) generated always as (counted_balance - expected_balance) stored,
@@ -30,7 +29,6 @@ set search_path = ''
 as $$
 declare
   v_existing public.cash_reconciliations%rowtype;
-  v_fingerprint text;
   v_expected numeric(14,2);
   v_id uuid;
 begin
@@ -38,12 +36,11 @@ begin
      or p_counted_balance is null or p_counted_balance < 0 then
     raise exception 'invalid cash reconciliation';
   end if;
-  v_fingerprint:=pg_catalog.md5(pg_catalog.jsonb_build_object('cashAccountId',p_cash_account_id,'countedBalance',round(p_counted_balance,2),'actor',p_actor,'notes',trim(coalesce(p_notes,'')))::text);
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
   select * into v_existing from public.cash_reconciliations where operation_id=p_operation_id;
   if found then
     if v_existing.cash_account_id<>p_cash_account_id or v_existing.counted_balance<>round(p_counted_balance,2)
-       or v_existing.created_by<>p_actor or v_existing.request_fingerprint<>v_fingerprint then raise exception 'cash reconciliation operation id conflict'; end if;
+       or v_existing.created_by<>p_actor then raise exception 'cash reconciliation operation id conflict'; end if;
     return pg_catalog.jsonb_build_object('id',v_existing.id,'cashAccountId',v_existing.cash_account_id,
       'expectedBalance',v_existing.expected_balance,'countedBalance',v_existing.counted_balance,
       'difference',v_existing.difference,'replayed',true);
@@ -51,8 +48,8 @@ begin
   perform 1 from public.cash_accounts where id=p_cash_account_id and active for update;
   if not found then raise exception 'cash account not found or inactive'; end if;
   v_expected:=round(public.cash_account_balance(p_cash_account_id),2);
-  insert into public.cash_reconciliations(operation_id,cash_account_id,request_fingerprint,expected_balance,counted_balance,notes,created_by)
-  values(p_operation_id,p_cash_account_id,v_fingerprint,v_expected,round(p_counted_balance,2),nullif(trim(coalesce(p_notes,'')),''),p_actor)
+  insert into public.cash_reconciliations(operation_id,cash_account_id,expected_balance,counted_balance,notes,created_by)
+  values(p_operation_id,p_cash_account_id,v_expected,round(p_counted_balance,2),nullif(trim(coalesce(p_notes,'')),''),p_actor)
   returning id into v_id;
   return pg_catalog.jsonb_build_object('id',v_id,'cashAccountId',p_cash_account_id,
     'expectedBalance',v_expected,'countedBalance',round(p_counted_balance,2),
