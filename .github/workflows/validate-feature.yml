@@ -32,53 +32,11 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Dependency audit summary
+      - name: Dependency audit
         run: |
           npm audit --json > npm-audit.json || true
-          node -e 'const a=require("./npm-audit.json"); for (const [name,v] of Object.entries(a.vulnerabilities || {})) console.log(JSON.stringify({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:(v.via || []).map(x => typeof x === "string" ? x : {title:x.title,url:x.url})}));'
+          node -e 'const a=require("./npm-audit.json"); const entries=Object.entries(a.vulnerabilities || {}); for (const [name,v] of entries) console.log(JSON.stringify({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:(v.via || []).map(x => typeof x === "string" ? x : {title:x.title,url:x.url})})); if (a.error || entries.length) process.exit(1);'
       - name: TypeScript check
         run: npx tsc --noEmit
       - name: Production build
         run: npm run build
-  patch-compatible-dependencies:
-    permissions:
-      contents: write
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/delivery-modal-daily-branch-ui'
-    needs: typecheck-and-build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install and apply compatible security fixes
-        run: |
-          npm ci
-          npm pkg set 'overrides.next.postcss=^8.5.23'
-          npm install --save-exact next@15.5.28
-          npm audit fix || true
-      - name: Check lockfile changes
-        id: changes
-        run: |
-          if git diff --quiet -- package.json package-lock.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Commit and push dependency fixes
-        if: steps.changes.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
-          git commit -m "chore: patch compatible npm vulnerabilities"
-          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c http.extraheader="AUTHORIZATION: basic $AUTH_HEADER" push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:$GITHUB_REF_NAME"
