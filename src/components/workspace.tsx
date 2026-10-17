@@ -14,7 +14,7 @@ import { InstallButton } from "@/components/pwa";
 import CentralCash from "@/components/central-cash";
 import StaffHours from "@/components/staff-hours";
 import AccountSection from "@/components/account-section";
-import { clearOfflineActor } from "@/lib/offline-sync";
+import { cachedRequestJson, clearOfflineActor } from "@/lib/offline-sync";
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
@@ -34,6 +34,7 @@ const permissionList: Permission[] = [
   { key: "payroll.advance.request", label: "طلب مسحوبات أو سلفة راتب" },
 ];
 async function api(url: string, init?: RequestInit) {
+  if ((init?.method ?? "GET").toUpperCase() === "GET" && new URL(url, window.location.origin).pathname === "/api/branches") return cachedRequestJson<any>(url, init);
   const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
