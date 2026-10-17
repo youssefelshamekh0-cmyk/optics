@@ -112,7 +112,7 @@ export async function GET(request: Request) {
     if(branchId)q=q.eq("branch_id",branchId); else if(!user!.roles.includes("super_admin"))q=q.in("branch_id",user!.branchIds);
     const [p,s,products,branches]=await Promise.all([q,admin.from("suppliers").select("id,name,phone,active").eq("active",true).order("name"),admin.from("products").select("id,name,sku,category").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name")]);
     if(p.error||s.error||products.error||branches.error)throw p.error??s.error??products.error??branches.error;
-    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("active",true).order("name");if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds);
+    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active,is_central").eq("active",true).order("name");if(branchId&&user!.roles.includes("super_admin"))accounts=accounts.or(`branch_id.eq.${branchId},is_central.eq.true`);else if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds);
     const [accountsR,branchRows]=await Promise.all([accounts,(()=>{let q=admin.from("branches").select("id,name,code,status").order("name");if(!user!.roles.includes("super_admin"))q=q.in("id",user!.branchIds);return q;})()]);if(accountsR.error||branchRows.error)throw accountsR.error??branchRows.error;
     return Response.json({purchases:p.data??[],suppliers:s.data??[],products:products.data??[],branches:branchRows.data??[],accounts:accountsR.data??[]});
   }
