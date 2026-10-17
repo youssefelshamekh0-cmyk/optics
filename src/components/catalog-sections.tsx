@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 type Branch = { id: string; name: string; status: "ACTIVE" | "INACTIVE" };
-type Product = { id: string; sku: string | null; name: string; category: string; brand: string | null; model: string | null; color: string | null; size: string | null; stock: { quantity: number; cost_price: number; reference_price: number } };
+type Product = { id: string; sku: string | null; name: string; category: string; brand: string | null; model: string | null; color: string | null; size: string | null; stock: { quantity: number; cost_price: number; reference_price: number; low_stock_threshold?: number; exists?: boolean } };
 const categoryLabels: Record<string, string> = { frame: "شنبر طبي", lens: "عدسة طبية", sunglasses: "نظارة شمسية", contact_lens: "عدسة لاصقة", sports_glasses: "نظارة رياضية", accessory: "إكسسوار", other: "أخرى" };
 const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
 async function requestJson(url: string, init?: RequestInit) {
@@ -22,7 +22,7 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ sku: "", name: "", category: "frame", brand: "", model: "", color: "", size: "", quantity: "0", costPrice: "0", referencePrice: "0" });
   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
-  const refresh = useCallback(async () => { if (!branchId) return; try { setProducts((await requestJson(`/api/inventory?branchId=${branchId}`)).products); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل المخزون"); } }, [branchId]);
+  const refresh = useCallback(async () => { if (!branchId) return; try { const rows = (await requestJson(`/api/inventory?branchId=${branchId}`)).products as Product[]; setProducts(rows); setCountDrafts(current => { const next = { ...current }; for (const product of rows) if (product.stock.exists && next[product.id] === undefined) next[product.id] = String(product.stock.quantity); return next; }); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل المخزون"); } }, [branchId]);
   useEffect(() => { void refresh(); }, [refresh]);
   async function save(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setNotice("");
@@ -32,6 +32,31 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
       setNotice("تمت إضافة الصنف ورصيد البداية للفرع"); await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ الصنف"); } finally { setBusy(false); }
   }
+
+  async function updateThreshold(product: Product, value: string) {
+    const threshold = Number(value);
+    if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100000) { setError("حد التنبيه يجب أن يكون عددًا صحيحًا غير سالب"); return; }
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await requestJson("/api/inventory", { method: "PATCH", body: JSON.stringify({ branchId, productId: product.id, lowStockThreshold: threshold }) });
+      setNotice("تم تحديث حد تنبيه المخزون"); await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحديث حد التنبيه"); } finally { setBusy(false); }
+  }
+
+  async function submitStockTake() {
+    const countedProducts = products.filter(product => product.stock.exists);
+    if (!branchId || countedProducts.length === 0) { setError("لا توجد أرصدة مخزون مسجلة لهذا الفرع للجرد"); return; }
+    const counts = countedProducts.map(product => ({ productId: product.id, countedQuantity: Number(countDrafts[product.id] ?? product.stock.quantity) }));
+    if (counts.some(row => !Number.isInteger(row.countedQuantity) || row.countedQuantity < 0 || row.countedQuantity > 100000)) { setError("راجع كميات الجرد؛ يجب أن تكون أعدادًا صحيحة غير سالبة"); return; }
+    if (!window.confirm("سيتم اعتماد الكميات الفعلية وتسجيل فروق الجرد كحركات تسوية غير قابلة للمحو. هل تريد المتابعة؟")) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await requestJson("/api/inventory/stock-takes", { method: "POST", body: JSON.stringify({ operationId: crypto.randomUUID(), branchId, notes: stockTakeNotes, counts }) });
+      const detail = result.result ?? {};
+      setNotice("تم اعتماد الجرد: " + String(detail.countedItems ?? counts.length) + " صنف، وتسوية " + String(detail.adjustedItems ?? 0) + " صنف.");
+      setStockTakeNotes(""); await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر اعتماد الجرد"); } finally { setBusy(false); }
+  }
   return <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">المنتجات والشنابر والعدسات</p><h2>الأصناف والمخزون</h2></div><span className="count-badge">{products.length} صنف</span></div>
     <div className="catalog-toolbar"><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label><span className="footnote">الرصيد والسعر المرجعي والتكلفة مستقلون لكل فرع.</span></div>
     {error && <div className="notice error">{error}</div>}{notice && <div className="notice success">{notice}</div>}
@@ -40,7 +65,14 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
       <label>كود الصنف SKU<input maxLength={80} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></label><label>الشركة / الماركة<input maxLength={100} value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></label><label>الموديل<input maxLength={100} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label><label>اللون<input maxLength={60} value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label><label>المقاس<input maxLength={60} value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })} /></label>
       <label>رصيد البداية<input required type="number" min="0" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label><label>تكلفة الشراء<input required type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} /></label><label>السعر المرجعي للفرع<input required type="number" min="0" step="0.01" value={form.referencePrice} onChange={(e) => setForm({ ...form, referencePrice: e.target.value })} /></label><button className="primary" disabled={busy || !branchId}>{busy ? "جارٍ الحفظ…" : "حفظ الصنف"}</button>
     </div></form>
-    <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الفئة</th><th>الكود</th><th>الكمية</th><th>التكلفة</th><th>السعر المرجعي</th></tr></thead><tbody>{products.map((p) => <tr key={p.id}><td><strong>{p.name}</strong><small>{[p.brand, p.model, p.color, p.size].filter(Boolean).join(" · ") || "—"}</small></td><td>{categoryLabels[p.category] ?? p.category}</td><td>{p.sku || "—"}</td><td>{p.stock.quantity}</td><td>{money(Number(p.stock.cost_price))}</td><td>{money(Number(p.stock.reference_price))}</td></tr>)}{products.length === 0 && <tr><td colSpan={6} className="table-empty">لا توجد أصناف لهذا الفرع حتى الآن.</td></tr>}</tbody></table></div>
+    <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الفئة</th><th>الكود</th><th>الكمية</th><th>حد التنبيه</th><th>التكلفة</th><th>السعر المرجعي</th></tr></thead><tbody>{products.map((p) => <tr key={p.id}><td><strong>{p.name}</strong><small>{[p.brand, p.model, p.color, p.size].filter(Boolean).join(" · ") || "—"}</small></td><td>{categoryLabels[p.category] ?? p.category}</td><td>{p.sku || "—"}</td><td><strong>{p.stock.quantity}</strong>{p.stock.exists && p.stock.low_stock_threshold !== undefined && p.stock.low_stock_threshold > 0 && p.stock.quantity <= p.stock.low_stock_threshold && <small className="notice error">مخزون منخفض</small>}</td><td>{p.stock.exists ? <form onSubmit={event => { event.preventDefault(); const field = (event.currentTarget.elements.namedItem("threshold") as HTMLInputElement); void updateThreshold(p, field.value); }}><input aria-label={"حد التنبيه لـ " + p.name} name="threshold" type="number" min="0" max="100000" step="1" defaultValue={p.stock.low_stock_threshold ?? 3} style={{ width: 76 }} /><button type="submit" disabled={busy}>حفظ</button></form> : "—"}</td><td>{money(Number(p.stock.cost_price))}</td><td>{money(Number(p.stock.reference_price))}</td></tr>)}{products.length === 0 && <tr><td colSpan={7} className="table-empty">لا توجد أصناف لهذا الفرع حتى الآن.</td></tr>}</tbody></table></div>
+    <section className="catalog-form" style={{ marginTop: 18 }}>
+      <div className="section-heading"><div><p className="eyebrow">مطابقة فعلية</p><h3>جرد مخزون الفرع</h3></div><span className="footnote">{products.filter(product => product.stock.exists).length} صنف له رصيد مسجل</span></div>
+      <p className="footnote">أدخل الكمية التي تم عدّها فعليًا لكل صنف. عند الاعتماد تُحفظ الكمية المتوقعة والفعلية والفرق، وتُسجل التسويات في سجل حركة المخزون.</p>
+      <label>ملاحظات الجرد<input maxLength={500} value={stockTakeNotes} onChange={event => setStockTakeNotes(event.target.value)} placeholder="مثال: جرد نهاية الأسبوع" /></label>
+      <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الرصيد بالنظام</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{products.filter(product => product.stock.exists).map(product => { const counted = Number(countDrafts[product.id] ?? product.stock.quantity); return <tr key={product.id}><td>{product.name}</td><td>{product.stock.quantity}</td><td><input aria-label={"الكمية الفعلية لـ " + product.name} type="number" min="0" max="100000" step="1" value={countDrafts[product.id] ?? String(product.stock.quantity)} onChange={event => setCountDrafts(old => ({ ...old, [product.id]: event.target.value }))} style={{ width: 100 }} /></td><td>{Number.isInteger(counted) ? counted - product.stock.quantity : "—"}</td></tr>; })}{products.every(product => !product.stock.exists) && <tr><td colSpan={4} className="table-empty">لا توجد أصناف مسجلة في مخزون الفرع.</td></tr>}</tbody></table></div>
+      <button type="button" className="primary" disabled={busy || !products.some(product => product.stock.exists)} onClick={() => void submitStockTake()}>{busy ? "جارٍ الاعتماد…" : "اعتماد الجرد وتسجيل الفروق"}</button>
+    </section>
     <p className="footnote">إضافة الصنف تسجل حركة رصيد بداية. التوريدات تسجل من تبويب «توريد العدسات»؛ بيع أصناف الكتالوج يخصم الكمية من رصيد الفرع بعد اعتماد الفاتورة.</p>
   </section>;
 }
