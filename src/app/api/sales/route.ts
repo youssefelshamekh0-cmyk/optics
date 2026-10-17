@@ -20,6 +20,7 @@ const createSaleSchema = z.object({
   initialPayment: z.number().finite().min(0).default(0),
   paymentMethod: z.enum(["cash", "card", "instapay", "other"]).default("cash"),
   notes: z.string().trim().max(1000).default(""),
+  operationId: z.string().uuid().optional(),
 });
 
 async function lookupLensPrice(admin: ReturnType<typeof getSupabaseAdmin>, branchId: string, lensTypeId: string, sphere: number, cylinder: number, options: string) {
@@ -151,16 +152,22 @@ export async function POST(request: Request) {
   if (finalTotal > referenceTotal) {
     return Response.json({ error: "الإجمالي النهائي لا يمكن أن يتجاوز إجمالي البنود المرجعي. راجع الأسعار والخصم." }, { status: 400 });
   }
-  const { data, error } = await admin.rpc("create_optics_sale", {
-    p_branch_id: input.branchId, p_customer_id: input.customerId, p_created_by: user!.id,
-    p_sale_type: input.saleType, p_items: items, p_prescription: prescription, p_final_total: finalTotal,
-    p_initial_payment: initialPayment, p_payment_method: input.paymentMethod, p_notes: input.notes,
+  const operationId = input.operationId ?? crypto.randomUUID();
+  const { data, error } = await admin.rpc("create_optics_sale_idempotent", {
+    p_operation_id: operationId, p_actor_id: user!.id,
+    p_branch_id: input.branchId, p_customer_id: input.customerId,
+    p_sale_type: input.saleType, p_items: items, p_prescription: prescription,
+    p_final_total: finalTotal, p_initial_payment: initialPayment,
+    p_payment_method: input.paymentMethod, p_notes: input.notes,
   });
-  if (error?.message.includes("insufficient product stock")) return Response.json({ error: "الكمية المطلوبة غير متاحة في مخزون الفرع" }, { status: 409 });
+  if (error?.message.includes("insufficient product stock")) return Response.json({ error: "الكمية المطلوبة غير متاحة في مخزون الفرع؛ راجع تعارض المخزون قبل إعادة المحاولة." }, { status: 409 });
   if (error?.message.includes("seller shift required")) return Response.json({ error: "افتح وردية أولاً من تبويب نظرة عامة قبل تسجيل الفواتير" }, { status: 409 });
+  if (error?.message.includes("idempotency key reused")) return Response.json({ error: "معرّف العملية مستخدم لبيانات مختلفة؛ لا تعِد إرسال الفاتورة بهذا المعرّف." }, { status: 409 });
   if (error) return Response.json({ error: "تعذر إنشاء الفاتورة. راجع المبالغ والبنود." }, { status: 400 });
-  const created = Array.isArray(data) ? data[0] : null;
-  if (!created) throw new Error("لم ترجع قاعدة البيانات رقم الفاتورة");
-  await audit(user!.id, "sale.create", "sale", created.sale_id, { branchId: input.branchId, invoiceNumber: created.invoice_number, saleType: input.saleType, referenceTotal, finalTotal });
-  return Response.json({ saleId: created.sale_id, invoiceNumber: created.invoice_number }, { status: 201 });
+  const created = (Array.isArray(data) ? data[0] : data) as { saleId?: string; invoiceNumber?: number; sale_id?: string; invoice_number?: number } | null;
+  const saleId = created?.saleId ?? created?.sale_id;
+  const invoiceNumber = created?.invoiceNumber ?? created?.invoice_number;
+  if (!saleId || invoiceNumber === undefined) throw new Error("لم ترجع قاعدة البيانات رقم الفاتورة");
+  await audit(user!.id, "sale.create", "sale", saleId, { operationId, branchId: input.branchId, invoiceNumber, saleType: input.saleType, referenceTotal, finalTotal });
+  return Response.json({ saleId, invoiceNumber, operationId }, { status: 201 });
 }

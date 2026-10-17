@@ -82,29 +82,41 @@ export async function GET(request: Request) {
   }
   if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], weekHours: [], weekStart: weekStartDate });
 
-  // Invoices of the day (sellers only see their own).
-  let salesQuery = admin.from("sales").select("id,invoice_number,branch_id,customer_id,created_by,grand_total,delivery_status,created_at").in("branch_id", branchIds).gte("created_at", from).lt("created_at", to).order("created_at", { ascending: false }).limit(500);
-  if (!isOwner) salesQuery = salesQuery.eq("created_by", user.id);
-  const { data: salesRows, error: salesError } = await salesQuery;
-  if (salesError) throw salesError;
-  const sales = salesRows ?? [];
+  // Include invoices created today and older invoices that received a payment today.
+  const { data: paymentsToday, error: paymentsTodayError } = await admin.from("sale_payments")
+    .select("sale_id,amount,created_at").gte("created_at", from).lt("created_at", to);
+  if (paymentsTodayError) throw paymentsTodayError;
+  const paymentSaleIds = [...new Set((paymentsToday ?? []).map((p: any) => p.sale_id))] as string[];
+  const [createdTodayResult, paidTodaySalesResult] = await Promise.all([
+    admin.from("sales").select("id,invoice_number,branch_id,customer_id,created_by,grand_total,delivery_status,created_at")
+      .in("branch_id", branchIds).gte("created_at", from).lt("created_at", to).order("created_at", { ascending: false }).limit(500),
+    paymentSaleIds.length ? admin.from("sales").select("id,invoice_number,branch_id,customer_id,created_by,grand_total,delivery_status,created_at")
+      .in("branch_id", branchIds).in("id", paymentSaleIds) : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (createdTodayResult.error || paidTodaySalesResult.error) throw createdTodayResult.error ?? paidTodaySalesResult.error;
+  const salesById = new Map<string, any>();
+  for (const sale of [...(createdTodayResult.data ?? []), ...(paidTodaySalesResult.data ?? [])]) salesById.set(sale.id, sale);
+  const sales = [...salesById.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   const saleIds = sales.map((s: any) => s.id);
   const customerIds = [...new Set(sales.map((s: any) => s.customer_id))] as string[];
   const sellerIds = [...new Set(sales.map((s: any) => s.created_by).filter(Boolean))] as string[];
   const [payments, customers, sellers] = await Promise.all([
-    saleIds.length ? fetchAll(admin.from("sale_payments").select("sale_id,amount").in("sale_id", saleIds)) : [],
+    saleIds.length ? fetchAll(admin.from("sale_payments").select("sale_id,amount,created_at").in("sale_id", saleIds)) : [],
     customerIds.length ? admin.from("customers").select("id,full_name,phone").in("id", customerIds) : { data: [], error: null },
     sellerIds.length ? admin.from("user_profiles").select("id,full_name").in("id", sellerIds) : { data: [], error: null },
   ]);
   if (customers.error || sellers.error) throw customers.error ?? sellers.error;
   const paidBySale = new Map<string, number>();
+  const collectedTodayBySale = new Map<string, number>();
+  const dateOf = (value: string) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
   for (const p of payments) paidBySale.set(p.sale_id, (paidBySale.get(p.sale_id) ?? 0) + Number(p.amount));
+  for (const p of paymentsToday ?? []) collectedTodayBySale.set(p.sale_id, (collectedTodayBySale.get(p.sale_id) ?? 0) + Number(p.amount));
   const customerMap = new Map((customers.data ?? []).map((c: any) => [c.id, c]));
   const sellerMap = new Map((sellers.data ?? []).map((s: any) => [s.id, s.full_name]));
   const branchMap = new Map((branches ?? []).map((b: any) => [b.id, b.name]));
   const invoices = sales.map((s: any) => {
     const paid = paidBySale.get(s.id) ?? 0; const total = Number(s.grand_total);
-    return { id: s.id, invoice_number: s.invoice_number, branch: branchMap.get(s.branch_id) ?? "", customer: (customerMap.get(s.customer_id) as any)?.full_name ?? "—", phone: (customerMap.get(s.customer_id) as any)?.phone ?? "", seller: sellerMap.get(s.created_by) ?? "—", total, paid, due: Math.max(0, total - paid), status: s.delivery_status, created_at: s.created_at };
+    return { id: s.id, invoice_number: s.invoice_number, branch: branchMap.get(s.branch_id) ?? "", customer: (customerMap.get(s.customer_id) as any)?.full_name ?? "—", phone: (customerMap.get(s.customer_id) as any)?.phone ?? "", seller: sellerMap.get(s.created_by) ?? "—", total, paid, dailyCollected: collectedTodayBySale.get(s.id) ?? 0, createdOnDay: s.created_at >= from && s.created_at < to, due: Math.max(0, total - paid), status: s.delivery_status, created_at: s.created_at };
   });
   const live = invoices.filter((i: any) => i.status !== "cancelled");
 
@@ -149,7 +161,7 @@ export async function GET(request: Request) {
 
   return Response.json({
     role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all",
-    summary: { invoices: live.length, sales: live.reduce((s: number, i: any) => s + i.total, 0), collected, due: live.reduce((s: number, i: any) => s + i.due, 0), expenses: expensesTotal, cashIn, cashOut },
+    summary: { invoices: live.filter((i: any) => i.createdOnDay).length, sales: live.filter((i: any) => i.createdOnDay).reduce((s: number, i: any) => s + i.total, 0), collected, due: live.filter((i: any) => i.createdOnDay).reduce((s: number, i: any) => s + i.due, 0), expenses: expensesTotal, cashIn, cashOut },
     invoices, accounts, expenses, shifts, weekHours, weekStart: weekStartDate,
   });
 }
