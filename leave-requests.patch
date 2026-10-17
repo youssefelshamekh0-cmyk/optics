@@ -1,0 +1,458 @@
+From ca39563e572dbd6b69ae5cd1b77aa4f70b957397 Mon Sep 17 00:00:00 2001
+From: dev <dev@example.com>
+Date: Sat, 17 Oct 2026 01:42:17 +0000
+Subject: [PATCH] Add leave/permission requests and merge staff tabs
+
+- sellers submit leave (days) or permission (hours) requests from their account
+- owner approves/rejects from the Staff tab, with pending badge
+- merge payroll, working hours and leave requests into one Staff tab
+---
+ src/app/api/leave-requests/route.ts           | 123 ++++++++++++++++++
+ src/app/globals.css                           |   1 +
+ src/components/leave-requests.tsx             | 122 +++++++++++++++++
+ src/components/staff-hub.tsx                  |  22 ++++
+ src/components/workspace.tsx                  |  26 +++-
+ .../20261017150000_leave_requests.sql         |  57 ++++++++
+ 6 files changed, 345 insertions(+), 6 deletions(-)
+ create mode 100644 src/app/api/leave-requests/route.ts
+ create mode 100644 src/components/leave-requests.tsx
+ create mode 100644 src/components/staff-hub.tsx
+ create mode 100644 supabase/migrations/20261017150000_leave_requests.sql
+
+diff --git a/src/app/api/leave-requests/route.ts b/src/app/api/leave-requests/route.ts
+new file mode 100644
+index 0000000..9f7bcfa
+--- /dev/null
++++ b/src/app/api/leave-requests/route.ts
+@@ -0,0 +1,123 @@
++import { z } from "zod";
++import { getSupabaseAdmin } from "@/lib/supabase/admin";
++import { getCurrentUser, requirePermission, requireSameOrigin } from "@/lib/auth";
++import { audit } from "@/lib/audit";
++
++const uuid = z.string().uuid();
++const date = z.string().date();
++const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
++const MAX_LEAVE_DAYS = 60;
++const MAX_PENDING = 10;
++const BACKDATE_DAYS = 7;
++
++const actionSchema = z.discriminatedUnion("action", [
++  z.object({ action: z.literal("create"), branchId: uuid, type: z.enum(["leave", "permission"]), startDate: date, endDate: date.optional(), startTime: time.optional(), endTime: time.optional(), reason: z.string().trim().max(500).default("") }),
++  z.object({ action: z.literal("cancel"), requestId: uuid }),
++  z.object({ action: z.literal("decide"), requestId: uuid, decision: z.enum(["approve", "reject"]), note: z.string().trim().max(500).default("") }),
++]);
++
++const todayCairo = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
++const shiftDay = (day: string, delta: number) => { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + delta); return d.toISOString().slice(0, 10); };
++const dayCount = (from: string, to: string) => Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000) + 1;
++const isOwner = (user: { roles: string[] }) => user.roles.includes("super_admin");
++const SELECT = "id,user_id,branch_id,request_type,start_date,end_date,start_time,end_time,reason,status,decision_note,created_at,decided_at,user_profiles(full_name,phone),branches(name)";
++
++export async function GET(request: Request) {
++  const user = await getCurrentUser();
++  if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
++  const admin = getSupabaseAdmin() as any;
++  const params = new URL(request.url).searchParams;
++
++  if (isOwner(user)) {
++    if (params.get("count") === "pending") {
++      const { count, error } = await admin.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
++      if (error) throw error;
++      return Response.json({ pending: count ?? 0 });
++    }
++    const status = z.enum(["pending", "approved", "rejected", "cancelled"]).safeParse(params.get("status") ?? "");
++    let query = admin.from("leave_requests").select(SELECT).order("created_at", { ascending: false }).limit(300);
++    if (status.success) query = query.eq("status", status.data);
++    const { data, error } = await query;
++    if (error) throw error;
++    return Response.json({ owner: true, requests: data ?? [] });
++  }
++
++  const { response } = await requirePermission("leave.request");
++  if (response) return response;
++  const { data, error } = await admin.from("leave_requests").select(SELECT).eq("user_id", user.id).order("created_at", { ascending: false }).limit(100);
++  if (error) throw error;
++  return Response.json({ owner: false, requests: data ?? [] });
++}
++
++export async function POST(request: Request) {
++  const parsed = actionSchema.safeParse(await request.json().catch(() => null));
++  if (!parsed.success) return Response.json({ error: "راجع بيانات الطلب" }, { status: 400 });
++  const input = parsed.data;
++  const { user, response } = await requirePermission(input.action === "decide" ? "staff.manage" : "leave.request");
++  if (response) return response;
++  if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
++  const admin = getSupabaseAdmin() as any;
++
++  if (input.action === "create") {
++    if (isOwner(user!)) return Response.json({ error: "تقديم الطلبات متاح لحسابات البائعين فقط" }, { status: 400 });
++    if (!user!.branchIds.includes(input.branchId)) return Response.json({ error: "اختر فرعًا من الفروع المسموح بها" }, { status: 403 });
++    const startDate = input.startDate;
++    let endDate = input.endDate ?? input.startDate;
++    let startTime: string | null = null;
++    let endTime: string | null = null;
++    if (input.type === "permission") {
++      endDate = startDate;
++      if (!input.startTime || !input.endTime) return Response.json({ error: "حدد وقت بداية ونهاية الاستئذان" }, { status: 400 });
++      if (input.endTime <= input.startTime) return Response.json({ error: "وقت النهاية يجب أن يكون بعد البداية" }, { status: 400 });
++      startTime = input.startTime; endTime = input.endTime;
++    } else {
++      if (endDate < startDate) return Response.json({ error: "نهاية الإجازة قبل بدايتها" }, { status: 400 });
++      if (dayCount(startDate, endDate) > MAX_LEAVE_DAYS) return Response.json({ error: `أقصى مدة للطلب الواحد ${MAX_LEAVE_DAYS} يومًا` }, { status: 400 });
++    }
++    const today = todayCairo();
++    if (startDate < shiftDay(today, -BACKDATE_DAYS)) return Response.json({ error: "لا يمكن تقديم طلب بتاريخ قديم" }, { status: 400 });
++    if (startDate > shiftDay(today, 366)) return Response.json({ error: "التاريخ بعيد جدًا" }, { status: 400 });
++
++    const active = await admin.from("leave_requests").select("id,request_type,start_date,end_date,start_time,end_time,status").eq("user_id", user!.id).in("status", ["pending", "approved"]).gte("end_date", shiftDay(today, -BACKDATE_DAYS - MAX_LEAVE_DAYS));
++    if (active.error) throw active.error;
++    const rows = (active.data ?? []) as Array<{ request_type: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; status: string }>;
++    if (rows.filter((r) => r.status === "pending").length >= MAX_PENDING) return Response.json({ error: "لديك طلبات كثيرة قيد المراجعة؛ انتظر قرار المالك" }, { status: 400 });
++    const overlap = rows.some((r) => {
++      if (r.request_type !== input.type || r.start_date > endDate || r.end_date < startDate) return false;
++      if (input.type === "leave") return true;
++      return (r.start_time ?? "") .slice(0, 5) < endTime! && (r.end_time ?? "").slice(0, 5) > startTime!;
++    });
++    if (overlap) return Response.json({ error: "لديك طلب سابق متداخل مع هذه الفترة" }, { status: 409 });
++
++    const employee = await admin.from("employees").select("id").eq("user_id", user!.id).maybeSingle();
++    if (employee.error) throw employee.error;
++    const { data, error } = await admin.from("leave_requests").insert({
++      user_id: user!.id, employee_id: employee.data?.id ?? null, branch_id: input.branchId, request_type: input.type,
++      start_date: startDate, end_date: endDate, start_time: startTime, end_time: endTime, reason: input.reason || null, created_by: user!.id,
++    }).select("id").single();
++    if (error) throw error;
++    await audit(user!.id, "leave.create", "leave_request", data.id, { type: input.type, startDate, endDate }).catch((e) => console.error(e));
++    return Response.json({ success: true, id: data.id }, { status: 201 });
++  }
++
++  if (input.action === "cancel") {
++    const { data, error } = await admin.from("leave_requests").update({ status: "cancelled", decided_by: user!.id, decided_at: new Date().toISOString() })
++      .eq("id", input.requestId).eq("user_id", user!.id).eq("status", "pending").select("id");
++    if (error) throw error;
++    if (!data?.length) return Response.json({ error: "لا يمكن إلغاء هذا الطلب" }, { status: 409 });
++    await audit(user!.id, "leave.cancel", "leave_request", input.requestId, {}).catch((e) => console.error(e));
++    return Response.json({ success: true });
++  }
++
++  const target = await admin.from("leave_requests").select("branch_id").eq("id", input.requestId).maybeSingle();
++  if (target.error) throw target.error;
++  if (!target.data) return Response.json({ error: "الطلب غير موجود" }, { status: 404 });
++  if (!isOwner(user!) && !user!.branchIds.includes(target.data.branch_id)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
++  const { error } = await admin.rpc("decide_leave_request", { p_request: input.requestId, p_decision: input.decision, p_note: input.note, p_actor: user!.id });
++  if (error) {
++    if (error.message?.includes("not pending")) return Response.json({ error: "تم البت في هذا الطلب مسبقًا" }, { status: 409 });
++    throw error;
++  }
++  await audit(user!.id, `leave.${input.decision}`, "leave_request", input.requestId, { note: input.note }).catch((e) => console.error(e));
++  return Response.json({ success: true });
++}
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 7a39650..ff49608 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -41,3 +41,4 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
+ .daily-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.daily-controls label{display:grid;gap:4px;font-size:10px;color:var(--muted)}.daily-controls select,.daily-date input{min-height:36px;border:1px solid #dfe6e1;border-radius:9px;padding:5px 10px;background:#fbfcfb;font-size:11px}.daily-date{display:flex;gap:6px;align-items:center}
+ @media(max-width:860px){.shift-running{grid-template-columns:1fr}.lens-new{grid-template-columns:1fr}.shift-timer strong{font-size:32px}.daily-controls{width:100%}.daily-controls label{flex:1 1 140px}}
+ .install-popup{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;width:min(calc(100% - 24px),430px);display:flex;align-items:center;gap:11px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:11px 13px;box-shadow:0 14px 40px #1e292c33}.install-popup-icon{width:38px;height:38px;flex:none;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:19px;font-weight:700}.install-popup-text{flex:1;min-width:0}.install-popup-text strong{display:block;font-size:12px}.install-popup-text small{display:block;color:var(--muted);font-size:10px;margin-top:3px;line-height:1.6}.install-popup-btn{flex:none;height:36px}.install-popup-close{flex:none;padding:6px;font-size:13px}
++.sub-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}.sub-tab{border:1px solid var(--line);border-radius:9px;background:var(--white);color:#687570;padding:9px 14px;font-size:11px}.sub-tab:hover{background:var(--mint)}.sub-tab.selected{background:var(--green);border-color:var(--green);color:#fff}
+diff --git a/src/components/leave-requests.tsx b/src/components/leave-requests.tsx
+new file mode 100644
+index 0000000..97186c5
+--- /dev/null
++++ b/src/components/leave-requests.tsx
+@@ -0,0 +1,122 @@
++"use client";
++import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
++
++type Branch = { id: string; name: string; status: "ACTIVE" | "INACTIVE" };
++type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled";
++type LeaveRequest = {
++  id: string; user_id: string; branch_id: string; request_type: "leave" | "permission"; start_date: string; end_date: string;
++  start_time: string | null; end_time: string | null; reason: string | null; status: LeaveStatus; decision_note: string | null;
++  created_at: string; decided_at: string | null; user_profiles: { full_name: string; phone: string | null } | null; branches: { name: string } | null;
++};
++
++const STATUS_LABEL: Record<LeaveStatus, string> = { pending: "قيد المراجعة", approved: "تمت الموافقة", rejected: "مرفوض", cancelled: "ملغي" };
++const statusClass = (s: LeaveStatus) => (s === "approved" ? "status active" : s === "pending" ? "status" : "status inactive");
++const todayLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
++const dayText = (d: string) => new Intl.DateTimeFormat("ar-EG", { weekday: "short", day: "numeric", month: "short" }).format(new Date(`${d}T00:00:00`));
++const days = (a: string, b: string) => Math.round((new Date(`${b}T00:00:00`).getTime() - new Date(`${a}T00:00:00`).getTime()) / 86400000) + 1;
++
++async function api(url: string, init?: RequestInit) {
++  const r = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
++  const d = await r.json().catch(() => ({}));
++  if (!r.ok) throw new Error(d.error ?? "تعذر تنفيذ الطلب");
++  return d;
++}
++
++function Period({ r }: { r: LeaveRequest }) {
++  if (r.request_type === "permission") return <><strong>{dayText(r.start_date)}</strong><small>من {r.start_time?.slice(0, 5)} إلى {r.end_time?.slice(0, 5)}</small></>;
++  if (r.start_date === r.end_date) return <><strong>{dayText(r.start_date)}</strong><small>يوم واحد</small></>;
++  return <><strong>{dayText(r.start_date)} ← {dayText(r.end_date)}</strong><small>{days(r.start_date, r.end_date)} أيام</small></>;
++}
++const typeLabel = (r: LeaveRequest) => (r.request_type === "leave" ? "إجازة" : "استئذان");
++
++/** Seller side: submit a leave / permission request and follow its status. */
++export function SellerLeave({ branches, branchIds }: { branches: Branch[]; branchIds: string[] }) {
++  const mine = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && branchIds.includes(b.id)), [branches, branchIds]);
++  const [requests, setRequests] = useState<LeaveRequest[]>([]);
++  const [form, setForm] = useState({ type: "leave" as "leave" | "permission", branchId: "", startDate: todayLocal(), endDate: todayLocal(), startTime: "10:00", endTime: "12:00", reason: "" });
++  const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
++
++  const load = useCallback(async () => {
++    try { const j = await api("/api/leave-requests"); setRequests(j.requests ?? []); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الطلبات"); }
++  }, []);
++  useEffect(() => { void load(); }, [load]);
++  useEffect(() => { if (!form.branchId && mine.length) setForm((f) => ({ ...f, branchId: mine[0].id })); }, [mine, form.branchId]);
++
++  async function submit(event: FormEvent) {
++    event.preventDefault(); setBusy(true); setError(""); setNotice("");
++    try {
++      const body = form.type === "leave"
++        ? { action: "create", type: "leave", branchId: form.branchId, startDate: form.startDate, endDate: form.endDate, reason: form.reason }
++        : { action: "create", type: "permission", branchId: form.branchId, startDate: form.startDate, startTime: form.startTime, endTime: form.endTime, reason: form.reason };
++      await api("/api/leave-requests", { method: "POST", body: JSON.stringify(body) });
++      setNotice("تم إرسال الطلب للمالك للمراجعة"); setForm((f) => ({ ...f, reason: "" })); await load();
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر إرسال الطلب"); } finally { setBusy(false); }
++  }
++  async function cancel(id: string) {
++    setBusy(true); setError(""); setNotice("");
++    try { await api("/api/leave-requests", { method: "POST", body: JSON.stringify({ action: "cancel", requestId: id }) }); setNotice("تم إلغاء الطلب"); await load(); }
++    catch (e) { setError(e instanceof Error ? e.message : "تعذر إلغاء الطلب"); } finally { setBusy(false); }
++  }
++
++  return <section className="panel operations-panel">
++    <div className="section-heading"><div><p className="eyebrow">طلبات الحضور</p><h2>طلب إجازة أو استئذان</h2></div></div>
++    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
++    <form className="ops-form" onSubmit={submit}>
++      <div className="ops-fields">
++        <label>نوع الطلب<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as "leave" | "permission" })}><option value="leave">إجازة (يوم أو أكثر)</option><option value="permission">استئذان (ساعات)</option></select></label>
++        {mine.length > 1 && <label>الفرع<select value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value })}>{mine.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>}
++        {form.type === "leave"
++          ? <><label>من تاريخ<input type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value, endDate: e.target.value > form.endDate ? e.target.value : form.endDate })} /></label><label>إلى تاريخ<input type="date" required min={form.startDate} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></label></>
++          : <><label>اليوم<input type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></label><label>من الساعة<input type="time" required value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} /></label><label>إلى الساعة<input type="time" required value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} /></label></>}
++        <label>السبب (اختياري)<input maxLength={500} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></label>
++      </div>
++      <button className="primary" disabled={busy || !form.branchId}>إرسال الطلب للمراجعة</button>
++    </form>
++    <h3 className="ops-subtitle">طلباتي</h3>
++    <div className="table-wrap"><table><thead><tr><th>النوع</th><th>الفترة</th><th>السبب</th><th>الحالة</th><th>ملاحظة المالك</th><th></th></tr></thead><tbody>
++      {requests.map((r) => <tr key={r.id}><td>{typeLabel(r)}</td><td><Period r={r} /></td><td>{r.reason || "—"}</td><td><span className={statusClass(r.status)}>{STATUS_LABEL[r.status]}</span></td><td>{r.decision_note || "—"}</td><td>{r.status === "pending" && <button type="button" className="row-action" disabled={busy} onClick={() => void cancel(r.id)}>إلغاء</button>}</td></tr>)}
++      {requests.length === 0 && <tr><td colSpan={6} className="table-empty">لم تقدّم أي طلبات بعد.</td></tr>}
++    </tbody></table></div>
++  </section>;
++}
++
++/** Owner side: review every request, approve or reject with an optional note. */
++export function OwnerLeaveRequests({ onDecided }: { onDecided?: () => void }) {
++  const [filter, setFilter] = useState<"pending" | "all" | "approved" | "rejected">("pending");
++  const [requests, setRequests] = useState<LeaveRequest[]>([]);
++  const [notes, setNotes] = useState<Record<string, string>>({});
++  const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
++
++  const load = useCallback(async () => {
++    setError("");
++    try { const j = await api(`/api/leave-requests${filter === "all" ? "" : `?status=${filter}`}`); setRequests(j.requests ?? []); }
++    catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الطلبات"); }
++  }, [filter]);
++  useEffect(() => { void load(); }, [load]);
++
++  async function decide(id: string, decision: "approve" | "reject") {
++    setBusy(true); setError(""); setNotice("");
++    try {
++      await api("/api/leave-requests", { method: "POST", body: JSON.stringify({ action: "decide", requestId: id, decision, note: notes[id] ?? "" }) });
++      setNotice(decision === "approve" ? "تمت الموافقة على الطلب" : "تم رفض الطلب"); await load(); onDecided?.();
++    } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ القرار"); await load(); onDecided?.(); } finally { setBusy(false); }
++  }
++
++  return <section className="panel operations-panel">
++    <div className="section-heading"><div><p className="eyebrow">من حسابات البائعين</p><h2>طلبات الإجازة والاستئذان</h2></div>
++      <label className="ops-branch">عرض<select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}><option value="pending">قيد المراجعة</option><option value="all">الكل</option><option value="approved">تمت الموافقة</option><option value="rejected">مرفوضة</option></select></label></div>
++    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
++    <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الفرع</th><th>النوع</th><th>الفترة</th><th>السبب</th><th>الحالة</th><th>القرار</th></tr></thead><tbody>
++      {requests.map((r) => <tr key={r.id}>
++        <td><strong>{r.user_profiles?.full_name ?? "—"}</strong><small>{r.user_profiles?.phone ?? ""}</small></td>
++        <td>{r.branches?.name ?? "—"}</td><td>{typeLabel(r)}</td><td><Period r={r} /></td><td>{r.reason || "—"}</td>
++        <td><span className={statusClass(r.status)}>{STATUS_LABEL[r.status]}</span>{r.status !== "pending" && r.decision_note && <small>{r.decision_note}</small>}</td>
++        <td>{r.status === "pending"
++          ? <div className="ops-inline-pay"><input aria-label="ملاحظة القرار" placeholder="ملاحظة (اختياري)" maxLength={500} value={notes[r.id] ?? ""} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} /><button type="button" className="row-action" disabled={busy} onClick={() => void decide(r.id, "approve")}>موافقة</button><button type="button" className="row-action" disabled={busy} onClick={() => void decide(r.id, "reject")}>رفض</button></div>
++          : "—"}</td>
++      </tr>)}
++      {requests.length === 0 && <tr><td colSpan={7} className="table-empty">{filter === "pending" ? "لا توجد طلبات قيد المراجعة." : "لا توجد طلبات."}</td></tr>}
++    </tbody></table></div>
++    <p className="footnote">الطلبات الملغاة من البائع تظهر ضمن «الكل» فقط.</p>
++  </section>;
++}
+diff --git a/src/components/staff-hub.tsx b/src/components/staff-hub.tsx
+new file mode 100644
+index 0000000..1864d06
+--- /dev/null
++++ b/src/components/staff-hub.tsx
+@@ -0,0 +1,22 @@
++"use client";
++import { useState } from "react";
++import OperationsSection from "@/components/operations-section";
++import StaffHours from "@/components/staff-hours";
++import { OwnerLeaveRequests } from "@/components/leave-requests";
++
++type Branch = { id: string; code: string; name: string; status: "ACTIVE" | "INACTIVE" };
++type View = "payroll" | "hours" | "leave";
++
++/** One "الموظفون" tab for the owner: payroll, working hours and leave/permission requests. */
++export default function StaffHub({ branches, branchIds, pendingLeave, onLeaveChanged }: { branches: Branch[]; branchIds: string[]; pendingLeave: number; onLeaveChanged: () => void }) {
++  const [view, setView] = useState<View>("payroll");
++  const items: Array<[View, string]> = [["payroll", "الموظفون والرواتب"], ["hours", "ساعات العمل"], ["leave", pendingLeave > 0 ? `طلبات الإجازة (${pendingLeave})` : "طلبات الإجازة"]];
++  return <>
++    <div className="sub-tabs" role="tablist" aria-label="أقسام الموظفين">
++      {items.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} className={`sub-tab ${view === id ? "selected" : ""}`} onClick={() => setView(id)}>{label}</button>)}
++    </div>
++    {view === "payroll" && <OperationsSection module="staff" branches={branches} branchIds={branchIds} isOwner />}
++    {view === "hours" && <StaffHours branches={branches} />}
++    {view === "leave" && <OwnerLeaveRequests onDecided={onLeaveChanged} />}
++  </>;
++}
+diff --git a/src/components/workspace.tsx b/src/components/workspace.tsx
+index 09cab93..fa8dc14 100644
+--- a/src/components/workspace.tsx
++++ b/src/components/workspace.tsx
+@@ -12,7 +12,8 @@ import DailyOverview from "@/components/daily-overview";
+ import DeliveriesPanel from "@/components/deliveries-panel";
+ import { InstallButton } from "@/components/pwa";
+ import CentralCash from "@/components/central-cash";
+-import StaffHours from "@/components/staff-hours";
++import StaffHub from "@/components/staff-hub";
++import { SellerLeave } from "@/components/leave-requests";
+ 
+ type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
+ type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
+@@ -30,6 +31,7 @@ const permissionList: Permission[] = [
+   { key: "staff.manage", label: "إدارة الموظفين والرواتب" },
+   { key: "expenses.create", label: "تسجيل مصروفات الفرع" },
+   { key: "payroll.advance.request", label: "طلب مسحوبات أو سلفة راتب" },
++  { key: "leave.request", label: "طلب إجازة أو استئذان" },
+ ];
+ async function api(url: string, init?: RequestInit) {
+   const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
+@@ -51,6 +53,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+   const [editingStaff, setEditingStaff] = useState<string | null>(null);
+   const [editingStaffStatus, setEditingStaffStatus] = useState("ACTIVE");
+   const isOwner = user?.roles.includes("super_admin") ?? false;
++  const [pendingLeave, setPendingLeave] = useState(0);
+ 
+   const refresh = useCallback(async () => {
+     if (!user) return;
+@@ -61,6 +64,15 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل البيانات"); }
+   }, [user, isOwner]);
+   useEffect(() => { void refresh(); }, [refresh]);
++  const loadPendingLeave = useCallback(async () => {
++    if (!isOwner) return;
++    try { const r = await fetch("/api/leave-requests?count=pending", { cache: "no-store" }); if (r.ok) { const j = await r.json(); setPendingLeave(Number(j.pending) || 0); } } catch { /* badge is best-effort */ }
++  }, [isOwner]);
++  useEffect(() => {
++    if (!user || !isOwner) return;
++    void loadPendingLeave(); const timer = window.setInterval(loadPendingLeave, 60000);
++    return () => window.clearInterval(timer);
++  }, [user, isOwner, loadPendingLeave]);
+   useEffect(() => {
+     if (!user) return;
+     let active = true;
+@@ -123,8 +135,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+       {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
+       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
+       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
+-      {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
+-      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="staff-hours" active={activeTab} setActive={setActiveTab}>ساعات الموظفين</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
++      {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request") || user.permissions.includes("leave.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
++      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>{pendingLeave > 0 ? `الموظفون (${pendingLeave})` : "الموظفون"}</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+     </nav>
+     <Notice error={error} message={message}/>
+     {activeTab === "overview" && <>
+@@ -139,14 +151,16 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
+     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
+     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+-    {!isOwner && activeTab === "seller-finance" && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
++    {!isOwner && activeTab === "seller-finance" && <>
++      {(user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
++      {user.permissions.includes("leave.request") && <SellerLeave branches={branches} branchIds={user.branchIds} />}
++    </>}
+     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
+     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+     {isOwner && activeTab === "purchases" && <OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+     {isOwner && activeTab === "finance" && <CentralCash />}
+     {isOwner && activeTab === "finance" && <OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+-    {isOwner && activeTab === "staff-hours" && <StaffHours branches={branches} />}
+-    {isOwner && activeTab === "staff-finance" && <OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
++    {isOwner && activeTab === "staff" && <StaffHub branches={branches} branchIds={user.branchIds} pendingLeave={pendingLeave} onLeaveChanged={() => void loadPendingLeave()} />}
+     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
+     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
+     {isOwner && activeTab === "branches" && <>
+diff --git a/supabase/migrations/20261017150000_leave_requests.sql b/supabase/migrations/20261017150000_leave_requests.sql
+new file mode 100644
+index 0000000..5afe5ae
+--- /dev/null
++++ b/supabase/migrations/20261017150000_leave_requests.sql
+@@ -0,0 +1,57 @@
++-- Leave / permission requests: a seller submits, the owner approves or rejects.
++insert into public.permissions(key,description) values
++ ('leave.request','طلب إجازة أو استئذان')
++on conflict(key) do nothing;
++insert into public.role_permissions(role_id,permission_id)
++select r.id,p.id from public.roles r cross join public.permissions p
++where r.key='salesperson' and p.key='leave.request' on conflict do nothing;
++
++create table public.leave_requests(
++ id uuid primary key default gen_random_uuid(),
++ user_id uuid not null references public.user_profiles(id) on delete restrict,
++ employee_id uuid references public.employees(id) on delete set null,
++ branch_id uuid not null references public.branches(id) on delete restrict,
++ request_type text not null check(request_type in ('leave','permission')),
++ start_date date not null,
++ end_date date not null,
++ start_time time,
++ end_time time,
++ reason varchar(500),
++ status text not null default 'pending' check(status in ('pending','approved','rejected','cancelled')),
++ decision_note varchar(500),
++ created_by uuid not null references auth.users(id) on delete restrict,
++ decided_by uuid references auth.users(id) on delete set null,
++ created_at timestamptz not null default now(),
++ decided_at timestamptz,
++ check(end_date>=start_date),
++ -- a leave covers whole days; a permission is a few hours inside a single day
++ check(
++  (request_type='leave' and start_time is null and end_time is null)
++  or (request_type='permission' and start_date=end_date and start_time is not null and end_time is not null and end_time>start_time)
++ ),
++ check((status='pending' and decided_at is null) or (status<>'pending' and decided_at is not null))
++);
++create index leave_requests_user_time_idx on public.leave_requests(user_id,created_at desc);
++create index leave_requests_status_idx on public.leave_requests(status,created_at desc);
++create index leave_requests_branch_idx on public.leave_requests(branch_id);
++create index leave_requests_employee_idx on public.leave_requests(employee_id);
++alter table public.leave_requests enable row level security;
++revoke all on public.leave_requests from anon,authenticated;
++grant all on public.leave_requests to service_role;
++
++create or replace function public.decide_leave_request(p_request uuid,p_decision text,p_note text,p_actor uuid)
++returns void language plpgsql security definer set search_path = '' as $$
++declare v_status text;
++begin
++ select status into v_status from public.leave_requests where id=p_request for update;
++ if not found or v_status<>'pending' then raise exception 'request is not pending'; end if;
++ if p_decision not in ('approve','reject') then raise exception 'invalid decision'; end if;
++ update public.leave_requests
++ set status=case when p_decision='approve' then 'approved' else 'rejected' end,
++     decision_note=nullif(left(coalesce(p_note,''),500),''),
++     decided_by=p_actor,
++     decided_at=now()
++ where id=p_request;
++end $$;
++revoke all on function public.decide_leave_request(uuid,text,text,uuid) from public,anon,authenticated;
++grant execute on function public.decide_leave_request(uuid,text,text,uuid) to service_role;
+-- 
+2.43.0
+
