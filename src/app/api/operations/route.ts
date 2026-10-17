@@ -72,7 +72,8 @@ export async function GET(request: Request) {
       counts=admin.from("stock_takes").select("id,branch_id,notes,created_by,created_at").order("created_at",{ascending:false}).limit(50);
       if(branchId)counts=counts.eq("branch_id",branchId);
     }
-    const [s,m,p,b,t,countsR]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name"),transfers,counts??Promise.resolve({data:[],error:null})]);
+    let branchesQuery=admin.from("branches").select("id,name,code,status").order("name");if(!user!.roles.includes("super_admin"))branchesQuery=branchesQuery.in("id",user!.branchIds);
+    const [s,m,p,b,t,countsR]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),branchesQuery,transfers,counts??Promise.resolve({data:[],error:null})]);
     if(s.error||m.error||p.error||b.error||t.error||countsR.error)throw s.error??m.error??p.error??b.error??t.error??countsR.error;
     const branchNames=new Map((b.data??[]).map((row:any)=>[row.id,row.name]));
     const countIds=(countsR.data??[]).map((row:any)=>row.id);
