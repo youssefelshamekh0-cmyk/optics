@@ -203,6 +203,19 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
     const actorId = storedActorId();
     if (!actorId) throw new Error("لا يمكن حفظ فاتورة دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");
     const requestInit = { ...init, headers: { "content-type": "application/json", ...init?.headers }, body: JSON.stringify(safePayload) };
+    if (parsedUrl.pathname === "/api/sales" && typeof safePayload.customerId === "string") {
+      const pendingCustomer = (await getActorOutbox()).find(item =>
+        item.type === "customer.create" && item.localCustomerId === safePayload.customerId && item.status !== "synced"
+      );
+      if (pendingCustomer) {
+        if (!safePayload.branchId) throw new Error("لا يمكن حفظ الفاتورة دون فرع محدد");
+        const now = Date.now();
+        await putOperation({ id: operationId, actorId, type: "sale.create", url: "/api/sales", payload: safePayload, status: "pending", createdAt: now, updatedAt: now, message: "بانتظار مزامنة العميل المحلي أولًا" });
+        notify();
+        if (navigator.onLine) void syncPendingOperations();
+        return { queued: true, operationId, invoiceNumber: null } as T;
+      }
+    }
     try {
       const response = await fetch(url, requestInit);
       const data = await response.json().catch(() => ({}));
