@@ -32,7 +32,10 @@ export async function GET(request: Request) {
     const ids=(data??[]).map((s:any)=>s.id);
     const paid=new Map<string,number>();
     if(ids.length){const pay=await admin.from("sale_payments").select("sale_id,amount").in("sale_id",ids);if(pay.error)throw pay.error;for(const x of pay.data??[])paid.set(x.sale_id,(paid.get(x.sale_id)??0)+Number(x.amount));}
-    return Response.json({ sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;const due=Math.round((Number(s.grand_total)-p)*100)/100;return {...s,paid_amount:Math.round(p*100)/100,due_amount:due,payment_balance_error:due < -0.009};}) });
+    const branchIds = user!.roles.includes("super_admin") ? [...new Set((data ?? []).map((s: any) => s.branch_id))] : user!.branchIds;
+    const accountsRes = branchIds.length ? await admin.from("cash_accounts").select("id,branch_id,name,payment_method").in("branch_id", branchIds).eq("active", true).order("name") : { data: [], error: null };
+    if (accountsRes.error) throw accountsRes.error;
+    return Response.json({ accounts: accountsRes.data ?? [], sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;const due=Math.round((Number(s.grand_total)-p)*100)/100;return {...s,paid_amount:Math.round(p*100)/100,due_amount:due,payment_balance_error:due < -0.009};}) });
   }
   const { user, response } = await owner(request); if (response) return response;
   const branchId = new URL(request.url).searchParams.get("branchId");
@@ -86,7 +89,7 @@ export async function GET(request: Request) {
 
 const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("delivery"),saleId:uuid,status:z.enum(["pending","processing","ready","delivered"]),notes:z.string().max(500).default("")}),
- z.object({action:z.literal("deliverAndCollect"),saleId:uuid}),
+ z.object({action:z.literal("deliverAndCollect"),saleId:uuid,cashAccountId:uuid.optional().or(z.literal(""))}),
  z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
  z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().max(300).default("")}),
  z.object({action:z.literal("cashAccount"),branchId:uuid,name:z.string().trim().min(2).max(120),accountType:z.enum(["cash","bank","digital"]),paymentMethod:z.enum(["cash","card","instapay","other"]),openingBalance:z.number().min(0).max(100000000)}),
@@ -110,7 +113,15 @@ export async function POST(request:Request){
  const admin=getSupabaseAdmin() as any; let entityId="";
  if(action==="deliverAndCollect"){
    const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
-   const {data,error}=await admin.rpc("deliver_sale_and_collect_balance",{p_sale_id:parsed.data.saleId,p_actor:user!.id}); if(error){if(String(error.message).includes("cash account not configured"))return Response.json({error:"لا توجد خزنة نقدية نشطة لهذا الفرع لتسجيل المتبقي."},{status:409});if(String(error.message).includes("already delivered"))return Response.json({error:"الفاتورة تم تسليمها بالفعل."},{status:409});throw error;} entityId=parsed.data.saleId;
+   if (!parsed.data.cashAccountId) {
+     const dueCheck = await admin.from("sale_payments").select("amount").eq("sale_id", parsed.data.saleId);
+     if (dueCheck.error) throw dueCheck.error;
+     const totalCheck = await admin.from("sales").select("grand_total").eq("id", parsed.data.saleId).single();
+     if (totalCheck.error) throw totalCheck.error;
+     const paidCheck = (dueCheck.data ?? []).reduce((sum: number, row: any) => sum + Number(row.amount), 0);
+     if (Number(totalCheck.data.grand_total) - paidCheck > 0.009) return Response.json({error:"اختر حساب الخزنة الذي سيتم تسجيل المتبقي فيه."},{status:400});
+   }
+   const {data,error}=await admin.rpc("deliver_sale_and_collect_balance",{p_sale_id:parsed.data.saleId,p_actor:user!.id,p_cash_account:parsed.data.cashAccountId || null}); if(error){if(String(error.message).includes("cash account not configured"))return Response.json({error:"حساب الخزنة المختار غير نشط أو لا يتبع فرع الفاتورة."},{status:409});if(String(error.message).includes("already delivered"))return Response.json({error:"الفاتورة تم تسليمها بالفعل."},{status:409});throw error;} entityId=parsed.data.saleId;
  }else if(action==="delivery"){
    const sale=await admin.from("sales").select("branch_id").eq("id",parsed.data.saleId).maybeSingle(); if(!sale.data)return Response.json({error:"الفاتورة غير موجودة"},{status:404}); if(!branchAllowed(user!,sale.data.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
    const {error}=await admin.rpc("change_sale_delivery",{p_sale_id:parsed.data.saleId,p_status:parsed.data.status,p_actor:user!.id,p_notes:parsed.data.notes}); if(error)throw error; entityId=parsed.data.saleId;
