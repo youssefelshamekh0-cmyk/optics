@@ -165,6 +165,7 @@ export async function GET(request: Request) {
       paymentLedgerMismatches,
       unmatchedOutflowCount: unmatchedOutflows.length,
       unmatchedOutflowAmount: total(unmatchedOutflows, "amount"),
+      dataLimit: rawPayments.length >= 10000 || (saleLedgerR.data ?? []).length >= 20000 || outflows.length >= 20000,
     },
     byBranch: branchRows,
     sales: sales.map((row: any) => ({ ...row, grand_total: Number(row.grand_total) })),
