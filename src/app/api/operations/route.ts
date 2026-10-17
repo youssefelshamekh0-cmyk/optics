@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     const ids=(data??[]).map((s:any)=>s.id);
     const paid=new Map<string,number>();
     if(ids.length){const pay=await admin.from("sale_payments").select("sale_id,amount").in("sale_id",ids);if(pay.error)throw pay.error;for(const x of pay.data??[])paid.set(x.sale_id,(paid.get(x.sale_id)??0)+Number(x.amount));}
-    return Response.json({ sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;return {...s,paid_amount:p,due_amount:Math.max(0,Number(s.grand_total)-p)};}) });
+    return Response.json({ sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;const due=Math.round((Number(s.grand_total)-p)*100)/100;return {...s,paid_amount:Math.round(p*100)/100,due_amount:due,payment_balance_error:due < -0.009};}) });
   }
   const { user, response } = await owner(request); if (response) return response;
   const branchId = new URL(request.url).searchParams.get("branchId");
