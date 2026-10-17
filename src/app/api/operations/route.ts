@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import type { Json } from "@/lib/supabase/database.types";
 import { getCurrentUser, requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
@@ -254,6 +255,6 @@ export async function POST(request:Request){
  if(action==="purchase")Object.assign(auditMetadata,{branchId:parsed.data.branchId,invoiceNumber:parsed.data.invoiceNumber,cashAccountId:parsed.data.cashAccountId??null,paidAmount:parsed.data.paidAmount});
  if(action==="payrollPay")Object.assign(auditMetadata,{operationId:parsed.data.operationId,payrollId:parsed.data.payrollId,cashAccountId:parsed.data.cashAccountId,amount:parsed.data.amount});
  if(action==="deliverAndCollect")Object.assign(auditMetadata,{saleId:parsed.data.saleId,cashAccountId:parsed.data.cashAccountId??null,discountAmount:parsed.data.discountAmount});
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,auditMetadata);
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,auditMetadata as unknown as Json);
  return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
 }
