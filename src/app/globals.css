@@ -57,3 +57,17 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
 /* My account: keep everything inside the phone screen */
 .account-grid>*{min-width:0}.account-grid .section-heading{flex-wrap:wrap;gap:8px}.account-grid .count-badge{max-width:100%}.account-grid .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.account-grid table{min-width:480px}.account-grid .form-grid>label,.account-grid .form-grid input{min-width:0;width:100%}
 @media(max-width:560px){.account-grid{gap:12px}.account-grid .form-panel{padding:17px 14px}.account-grid .form-grid{grid-template-columns:1fr}.account-grid .form-grid .wide{grid-column:auto}.account-grid .primary{width:100%}.account-kpis strong{font-size:17px}.workspace-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+
+
+/* Daily register list */
+.daily-list{display:flex;flex-direction:column;gap:12px;margin-top:16px}
+.daily-list-row{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(260px,2fr) auto;align-items:center;gap:16px;border:1px solid var(--border,#e4e9e6);border-radius:14px;padding:16px;background:var(--surface,#fff)}
+.daily-list-date{display:flex;flex-direction:column;gap:8px}
+.daily-list-date strong{font-size:15px}
+.daily-list-date .status{display:inline-flex;align-self:flex-start;border-radius:999px;padding:5px 10px;font-size:12px;background:#edf1ef;color:#52615c}
+.daily-list-date .status.bad{background:#fae9e8;color:#a33c35}
+.daily-list-date .status.good{background:#e7f3ed;color:#216b54}
+.daily-list-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
+.daily-list-stats span{display:flex;justify-content:space-between;gap:8px;color:var(--muted,#66736e);font-size:13px}
+.daily-list-stats strong{color:var(--foreground,#173f39);white-space:nowrap}
+@media(max-width:680px){.daily-list-row{grid-template-columns:1fr auto;gap:12px;padding:12px}.daily-list-date{grid-column:1/-1;flex-direction:row;justify-content:space-between;align-items:center}.daily-list-stats{grid-column:1/-1;gap:8px 12px}.daily-list-row>.row-action{grid-column:2;grid-row:2}}
