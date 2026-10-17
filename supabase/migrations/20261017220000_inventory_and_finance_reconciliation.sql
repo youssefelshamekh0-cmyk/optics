@@ -269,3 +269,62 @@ end;
 $$;
 revoke all on function public.record_inventory_stock_count(uuid,uuid,jsonb,uuid,text) from public,anon,authenticated;
 grant execute on function public.record_inventory_stock_count(uuid,uuid,jsonb,uuid,text) to service_role;
+
+
+-- Capture acquisition cost at sale time so profitability reports do not use today's
+-- inventory cost for historic sales. Legacy values are explicitly marked estimated.
+alter table public.sale_items
+  add column if not exists unit_cost numeric(12,2) not null default 0,
+  add column if not exists unit_cost_is_estimated boolean not null default true;
+
+update public.sale_items si
+set unit_cost = bp.cost_price,
+    unit_cost_is_estimated = true
+from public.sales s
+join public.branch_products bp on bp.branch_id=s.branch_id
+where s.id=si.sale_id and si.product_id=bp.product_id;
+
+create or replace function public.capture_sale_item_cost()
+returns trigger language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_branch uuid;
+  v_cost numeric(12,2);
+  v_right_cost numeric(12,2);
+  v_left_cost numeric(12,2);
+begin
+  select branch_id into v_branch from public.sales where id=new.sale_id;
+  if not found then raise exception 'sale not found for cost snapshot'; end if;
+  if new.product_id is not null then
+    select cost_price into v_cost from public.branch_products
+    where branch_id=v_branch and product_id=new.product_id;
+    if found then
+      new.unit_cost:=coalesce(v_cost,0);
+      new.unit_cost_is_estimated:=false;
+    else
+      new.unit_cost:=0;
+      new.unit_cost_is_estimated:=true;
+    end if;
+  elsif new.item_kind='prescription_lens' then
+    select cost_price into v_right_cost from public.branch_lens_prices
+    where id=nullif(new.technical_details->'right'->>'priceId','')::uuid and branch_id=v_branch and active;
+    select cost_price into v_left_cost from public.branch_lens_prices
+    where id=nullif(new.technical_details->'left'->>'priceId','')::uuid and branch_id=v_branch and active;
+    if v_right_cost is not null and v_left_cost is not null then
+      new.unit_cost:=round(v_right_cost+v_left_cost,2);
+      new.unit_cost_is_estimated:=false;
+    else
+      new.unit_cost:=0;
+      new.unit_cost_is_estimated:=true;
+    end if;
+  else
+    new.unit_cost:=0;
+    new.unit_cost_is_estimated:=true;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.capture_sale_item_cost() from public,anon,authenticated;
+drop trigger if exists sale_items_capture_cost on public.sale_items;
+create trigger sale_items_capture_cost before insert on public.sale_items
+for each row execute function public.capture_sale_item_cost();
