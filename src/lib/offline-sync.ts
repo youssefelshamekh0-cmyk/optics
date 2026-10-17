@@ -37,6 +37,12 @@ export function setOfflineActor(actorId: string) {
   notify();
 }
 
+export function clearOfflineActor() {
+  activeActorId = null;
+  try { window.localStorage.removeItem("nazra-offline-actor"); } catch { /* Local storage may be disabled. */ }
+  notify();
+}
+
 async function refreshOfflineActor(): Promise<string | null> {
   if (typeof navigator === "undefined" || !navigator.onLine) return storedActorId();
   try {
@@ -247,11 +253,11 @@ export function registerOfflineSync() {
     if (!navigator.onLine) return;
     try {
       const response = await fetch("/api/auth/session", { cache: "no-store" });
-      if (response.ok) {
-        const data = await response.json();
-        if (typeof data.user?.id === "string") setOfflineActor(data.user.id);
-      }
-    } catch { /* Do not send queued operations until an authenticated session is reachable. */ }
+      if (!response.ok) return;
+      const data = await response.json();
+      if (typeof data.user?.id !== "string") return;
+      setOfflineActor(data.user.id);
+    } catch { /* Do not send queued operations until an authenticated session is reachable. */ return; }
     await syncPendingSales();
   };
   window.addEventListener("online", sync);
