@@ -30,10 +30,18 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) {
     return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   }
-  const { data, error } = await (admin as any).from("cash_accounts")
-    .select("id,name,payment_method").eq("branch_id", sale.branch_id).eq("active", true).order("name");
+  const [{ data, error }, { data: returnedItems, error: returnedError }] = await Promise.all([
+    (admin as any).from("cash_accounts")
+      .select("id,name,payment_method").eq("branch_id", sale.branch_id).eq("active", true).order("name"),
+    (admin as any).from("sale_return_items")
+      .select("sale_item_id,quantity,sale_returns!inner(sale_id)")
+      .eq("sale_returns.sale_id", id),
+  ]);
   if (error) throw error;
-  return Response.json({ accounts: data ?? [] });
+  if (returnedError) throw returnedError;
+  const returnedQuantities: Record<string, number> = {};
+  for (const item of returnedItems ?? []) returnedQuantities[item.sale_item_id] = (returnedQuantities[item.sale_item_id] ?? 0) + Number(item.quantity);
+  return Response.json({ accounts: data ?? [], returnedQuantities });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
