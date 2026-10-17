@@ -36,3 +36,35 @@ export function InstallButton() {
   if (!available && !ios) return null;
   return <span className="install-wrap"><button type="button" className="quiet install-btn" onClick={() => void install()}>⬇ تثبيت التطبيق</button>{hint && ios && <span className="install-hint" role="note">في سفاري اضغط «مشاركة» ثم «إضافة إلى الشاشة الرئيسية».</span>}</span>;
 }
+
+const DISMISS_KEY = "nazra-install-dismissed";
+const DISMISS_DAYS = 7;
+const recentlyDismissed = () => { try { const at = Number(window.localStorage.getItem(DISMISS_KEY)); return Boolean(at) && Date.now() - at < DISMISS_DAYS * 86400000; } catch { return false; } };
+
+/** Small bottom pop-up offering to install the site as an app. Hidden once installed or dismissed (for a week). */
+export function InstallPrompt() {
+  const [visible, setVisible] = useState(false);
+  const [ios, setIos] = useState(false);
+  useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    setIos(isIos);
+    const sync = () => setVisible(!standalone && !recentlyDismissed() && (Boolean(window.__nazraInstall) || isIos));
+    sync(); window.addEventListener("pwa-installable", sync);
+    return () => window.removeEventListener("pwa-installable", sync);
+  }, []);
+  function dismiss() { try { window.localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* storage may be blocked */ } setVisible(false); }
+  async function install() {
+    const prompt = window.__nazraInstall;
+    if (!prompt) return;
+    await prompt.prompt(); await prompt.userChoice.catch(() => undefined);
+    window.__nazraInstall = null; setVisible(false);
+  }
+  if (!visible) return null;
+  return <div className="install-popup" role="dialog" aria-label="تثبيت التطبيق">
+    <span className="install-popup-icon" aria-hidden="true">ن</span>
+    <div className="install-popup-text"><strong>ثبّت «نظرة» كتطبيق</strong><small>{ios && !window.__nazraInstall ? "في سفاري اضغط «مشاركة» ثم «إضافة إلى الشاشة الرئيسية»." : "فتح أسرع وتجربة أوضح من شاشة الموبايل مباشرة."}</small></div>
+    {(!ios || window.__nazraInstall) && <button type="button" className="primary install-popup-btn" onClick={() => void install()}>تثبيت</button>}
+    <button type="button" className="quiet install-popup-close" onClick={dismiss} aria-label="إغلاق">✕</button>
+  </div>;
+}

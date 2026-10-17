@@ -1,0 +1,100 @@
+diff --git a/src/app/api/daily/route.ts b/src/app/api/daily/route.ts
+index 3fe8fab..7480e3b 100644
+--- a/src/app/api/daily/route.ts
++++ b/src/app/api/daily/route.ts
+@@ -23,6 +23,8 @@ export async function GET(request: Request) {
+   const user = await getCurrentUser();
+   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
+   const isOwner = user.roles.includes("super_admin");
++  // The daily overview (invoices, collections and shift hours across the day) is for the brand owner only.
++  if (!isOwner) return Response.json({ error: "هذه الشاشة متاحة لمالك البراند" }, { status: 403 });
+   const params = new URL(request.url).searchParams;
+   const today = todayCairo();
+   const dateParam = params.get("date");
+diff --git a/src/app/globals.css b/src/app/globals.css
+index fa5697b..7a39650 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -40,3 +40,4 @@ button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:line-through}
+ .daily-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.daily-controls label{display:grid;gap:4px;font-size:10px;color:var(--muted)}.daily-controls select,.daily-date input{min-height:36px;border:1px solid #dfe6e1;border-radius:9px;padding:5px 10px;background:#fbfcfb;font-size:11px}.daily-date{display:flex;gap:6px;align-items:center}
+ @media(max-width:860px){.shift-running{grid-template-columns:1fr}.lens-new{grid-template-columns:1fr}.shift-timer strong{font-size:32px}.daily-controls{width:100%}.daily-controls label{flex:1 1 140px}}
++.install-popup{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:50;width:min(calc(100% - 24px),430px);display:flex;align-items:center;gap:11px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:11px 13px;box-shadow:0 14px 40px #1e292c33}.install-popup-icon{width:38px;height:38px;flex:none;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:19px;font-weight:700}.install-popup-text{flex:1;min-width:0}.install-popup-text strong{display:block;font-size:12px}.install-popup-text small{display:block;color:var(--muted);font-size:10px;margin-top:3px;line-height:1.6}.install-popup-btn{flex:none;height:36px}.install-popup-close{flex:none;padding:6px;font-size:13px}
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index 313818e..461835c 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -1,6 +1,6 @@
+ import type { Metadata, Viewport } from "next";
+ import "./globals.css";
+-import { PwaRegister } from "@/components/pwa";
++import { InstallPrompt, PwaRegister } from "@/components/pwa";
+ 
+ export const metadata: Metadata = {
+   title: "نظرة | إدارة الفروع",
+@@ -12,5 +12,5 @@ export const metadata: Metadata = {
+ export const viewport: Viewport = { themeColor: "#27685f", width: "device-width", initialScale: 1 };
+ 
+ export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+-  return <html lang="ar" dir="rtl"><body>{children}<PwaRegister /></body></html>;
++  return <html lang="ar" dir="rtl"><body>{children}<PwaRegister /><InstallPrompt /></body></html>;
+ }
+diff --git a/src/components/pwa.tsx b/src/components/pwa.tsx
+index 64642e9..75ae05a 100644
+--- a/src/components/pwa.tsx
++++ b/src/components/pwa.tsx
+@@ -36,3 +36,35 @@ export function InstallButton() {
+   if (!available && !ios) return null;
+   return <span className="install-wrap"><button type="button" className="quiet install-btn" onClick={() => void install()}>⬇ تثبيت التطبيق</button>{hint && ios && <span className="install-hint" role="note">في سفاري اضغط «مشاركة» ثم «إضافة إلى الشاشة الرئيسية».</span>}</span>;
+ }
++
++const DISMISS_KEY = "nazra-install-dismissed";
++const DISMISS_DAYS = 7;
++const recentlyDismissed = () => { try { const at = Number(window.localStorage.getItem(DISMISS_KEY)); return Boolean(at) && Date.now() - at < DISMISS_DAYS * 86400000; } catch { return false; } };
++
++/** Small bottom pop-up offering to install the site as an app. Hidden once installed or dismissed (for a week). */
++export function InstallPrompt() {
++  const [visible, setVisible] = useState(false);
++  const [ios, setIos] = useState(false);
++  useEffect(() => {
++    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
++    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
++    setIos(isIos);
++    const sync = () => setVisible(!standalone && !recentlyDismissed() && (Boolean(window.__nazraInstall) || isIos));
++    sync(); window.addEventListener("pwa-installable", sync);
++    return () => window.removeEventListener("pwa-installable", sync);
++  }, []);
++  function dismiss() { try { window.localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* storage may be blocked */ } setVisible(false); }
++  async function install() {
++    const prompt = window.__nazraInstall;
++    if (!prompt) return;
++    await prompt.prompt(); await prompt.userChoice.catch(() => undefined);
++    window.__nazraInstall = null; setVisible(false);
++  }
++  if (!visible) return null;
++  return <div className="install-popup" role="dialog" aria-label="تثبيت التطبيق">
++    <span className="install-popup-icon" aria-hidden="true">ن</span>
++    <div className="install-popup-text"><strong>ثبّت «نظرة» كتطبيق</strong><small>{ios && !window.__nazraInstall ? "في سفاري اضغط «مشاركة» ثم «إضافة إلى الشاشة الرئيسية»." : "فتح أسرع وتجربة أوضح من شاشة الموبايل مباشرة."}</small></div>
++    {(!ios || window.__nazraInstall) && <button type="button" className="primary install-popup-btn" onClick={() => void install()}>تثبيت</button>}
++    <button type="button" className="quiet install-popup-close" onClick={dismiss} aria-label="إغلاق">✕</button>
++  </div>;
++}
+diff --git a/src/components/workspace.tsx b/src/components/workspace.tsx
+index 91b315a..09cab93 100644
+--- a/src/components/workspace.tsx
++++ b/src/components/workspace.tsx
+@@ -131,11 +131,11 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
+     <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "الفروع المتاحة لك تظهر هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
+     <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={isOwner ? String(staff.length).padStart(2, "0") : "—"} detail={isOwner ? "حسابات المستخدمين" : "حسب صلاحيتك"}/></section>
+     <ShiftPanel />
+-    <DailyOverview />
++    {isOwner && <DailyOverview />}
+     <FinanceCharts />
+-    <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
++    {isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
+       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
+-    </section></>}
++    </section>}</>}
+     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
+     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
+     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
