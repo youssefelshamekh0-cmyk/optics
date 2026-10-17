@@ -82,6 +82,8 @@ function notify() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("nazra:sync-state"));
 }
 
+export async function offlineOperations(): Promise<OfflineSaleOperation[]> { return getOutbox(); }
+
 export async function offlineSummary(): Promise<OfflineSummary> {
   const operations = await getOutbox();
   return {
