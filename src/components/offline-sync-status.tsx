@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { clearSyncedOfflineOperations, offlineOperations, offlineSummary, registerOfflineSync, retryOfflineOperation, reviseOfflineSale, setOfflineActor, type OfflineQueueOperation, type OfflineSummary } from "@/lib/offline-sync";
+import { clearSyncedOfflineOperations, offlineOperations, offlineSummary, registerOfflineSync, retryOfflineOperation, reviseOfflineCustomer, reviseOfflineSale, setOfflineActor, type OfflineQueueOperation, type OfflineSummary } from "@/lib/offline-sync";
 
 const labels: Record<OfflineQueueOperation["status"], string> = {
   pending: "بانتظار المزامنة", syncing: "جارٍ المزامنة", conflict: "تعارض يحتاج مراجعة",
@@ -16,6 +16,7 @@ export default function OfflineSyncStatus() {
   const [expanded, setExpanded] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [customerDrafts, setCustomerDrafts] = useState<Record<string, { name: string; phone: string }>>({});
 
   const refresh = useCallback(async () => {
     const [nextSummary, nextOperations] = await Promise.all([offlineSummary(), offlineOperations()]);
@@ -117,7 +118,20 @@ export default function OfflineSyncStatus() {
               <small>تعديل الكمية لا يضمن توافر المخزون؛ الخادم يعيد التحقق قبل اعتماد الفاتورة.</small>
             </div>
           </>}
-          {operation.type === "customer.create" && operation.status === "conflict" && <p>راجع رقم الهاتف؛ قد يكون العميل مسجلًا بالفعل. لن تُزامن الفاتورة التابعة حتى حل هذه العملية.</p>}
+          {operation.type === "customer.create" && (operation.status === "conflict" || operation.status === "rejected") && <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            <p>راجع اسم العميل ورقم الهاتف. الفاتورة التابعة ستنتظر حتى تتم مزامنة العميل بنجاح.</p>
+            <label>اسم العميل<input value={customerDrafts[operation.id]?.name ?? String(operation.payload.name ?? "")} onChange={event => setCustomerDrafts(old => ({ ...old, [operation.id]: { name: event.target.value, phone: old[operation.id]?.phone ?? String(operation.payload.phone ?? "") } }))} style={{ display: "block", width: "100%", marginTop: 3 }} /></label>
+            <label>رقم الهاتف<input value={customerDrafts[operation.id]?.phone ?? String(operation.payload.phone ?? "")} onChange={event => setCustomerDrafts(old => ({ ...old, [operation.id]: { name: old[operation.id]?.name ?? String(operation.payload.name ?? ""), phone: event.target.value } }))} style={{ display: "block", width: "100%", marginTop: 3 }} /></label>
+            {errors[operation.id] && <p role="alert" style={{ color: "#a02b2b", margin: 0 }}>{errors[operation.id]}</p>}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => {
+                const draft = customerDrafts[operation.id] ?? { name: String(operation.payload.name ?? ""), phone: String(operation.payload.phone ?? "") };
+                void reviseOfflineCustomer(operation.id, { name: draft.name, phone: draft.phone, email: String(operation.payload.email ?? ""), notes: String(operation.payload.notes ?? "") })
+                  .then(refresh).catch(error => setErrors(old => ({ ...old, [operation.id]: error instanceof Error ? error.message : "تعذر حفظ بيانات العميل" })));
+              }}>حفظ بيانات العميل</button>
+              <button type="button" onClick={() => void retryOfflineOperation(operation.id).then(refresh)} disabled={!summary.online}>إعادة المحاولة</button>
+            </div>
+          </div>}
         </div>)}
         {!operations.length && <p>لا توجد عمليات في قائمة المزامنة.</p>}
       </div>
