@@ -43,7 +43,7 @@ This work stays on `fix/delivery-modal-daily-branch-ui` / PR #20. Do not merge t
 - [x] Review and harden the touched customer, payment, transfer, stock-take, cash-reconciliation, and reporting API paths with permission and branch checks.
 - [ ] Finish route-by-route authorization/RLS/grant review for every API route, view, and RPC.
 - [ ] Add automated tests for sale/payment/return/treasury idempotency, inventory races, branch isolation, and permissions.
-- [ ] Apply migrations only to isolated staging; run migration validation, production build, smoke tests, and a backup/restore rehearsal.
+- [ ] Reconcile the existing staging migration baseline first (staging currently records only `20261017125800 deliver_sale_collect_balance` despite having the app schema), then apply migrations only to isolated staging; run migration validation, production build, smoke tests, and a backup/restore rehearsal.\n- [x] Document detailed staging test scenarios and environment guardrails in `docs/staging-validation-plan.md`.
 - [ ] Verify build/deployment checks and document rollback before review.
 
 ## Acceptance checks before merge
