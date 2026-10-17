@@ -222,11 +222,26 @@ export async function syncPendingOperations(): Promise<void> {
         break;
       }
       if (response.ok) {
-        await putOperation({
-          ...operation, status: "synced", updatedAt: Date.now(),
-          result: { saleId: typeof data.saleId === "string" ? data.saleId : undefined, invoiceNumber: typeof data.invoiceNumber === "number" ? data.invoiceNumber : undefined },
-          message: "تمت المزامنة بنجاح",
-        });
+        const responseData = data as { saleId?: unknown; invoiceNumber?: unknown; customer?: { id?: unknown } };
+        const result = {
+          saleId: typeof responseData.saleId === "string" ? responseData.saleId : undefined,
+          invoiceNumber: typeof responseData.invoiceNumber === "number" ? responseData.invoiceNumber : undefined,
+          customerId: typeof responseData.customer?.id === "string" ? responseData.customer.id : undefined,
+        };
+        await putOperation({ ...operation, status: "synced", updatedAt: Date.now(), result, message: "تمت المزامنة بنجاح" });
+        if (operation.type === "customer.create" && operation.localCustomerId && result.customerId) {
+          const dependents = (await getActorOutbox()).filter(item =>
+            item.type === "sale.create" && item.status === "pending" && item.payload.customerId === operation.localCustomerId
+          );
+          for (const dependent of dependents) {
+            await putOperation({
+              ...dependent,
+              payload: { ...dependent.payload, customerId: result.customerId },
+              updatedAt: Date.now(),
+              message: "تم ربط العميل المحلي بسجل العميل على الخادم.",
+            });
+          }
+        }
         continue;
       }
       if (response.status === 409) {
