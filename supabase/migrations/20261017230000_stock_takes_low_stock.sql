@@ -7,6 +7,7 @@ create table if not exists public.stock_takes (
   id uuid primary key default gen_random_uuid(),
   operation_id uuid not null unique,
   branch_id uuid not null references public.branches(id) on delete restrict,
+  request_fingerprint text not null,
   notes varchar(500),
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
@@ -43,6 +44,7 @@ set search_path = ''
 as $$
 declare
   v_existing public.stock_takes%rowtype;
+  v_fingerprint text;
   v_take_id uuid;
   v_item jsonb;
   v_product uuid;
@@ -59,10 +61,11 @@ begin
     raise exception 'invalid stock take request';
   end if;
 
+  v_fingerprint := pg_catalog.md5(pg_catalog.jsonb_build_object('branchId',p_branch_id,'counts',p_counts,'notes',trim(coalesce(p_notes,'')))::text);
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
   select * into v_existing from public.stock_takes where operation_id=p_operation_id;
   if found then
-    if v_existing.branch_id<>p_branch_id or v_existing.created_by<>p_actor then
+    if v_existing.branch_id<>p_branch_id or v_existing.created_by<>p_actor or v_existing.request_fingerprint<>v_fingerprint then
       raise exception 'stock take operation id conflict';
     end if;
     return pg_catalog.jsonb_build_object('stockTakeId',v_existing.id,'replayed',true);
@@ -84,8 +87,8 @@ begin
    order by bp.product_id
    for update;
 
-  insert into public.stock_takes(operation_id,branch_id,notes,created_by)
-  values(p_operation_id,p_branch_id,nullif(trim(coalesce(p_notes,'')),''),p_actor)
+  insert into public.stock_takes(operation_id,branch_id,request_fingerprint,notes,created_by)
+  values(p_operation_id,p_branch_id,v_fingerprint,nullif(trim(coalesce(p_notes,'')),''),p_actor)
   returning id into v_take_id;
 
   for v_item in
