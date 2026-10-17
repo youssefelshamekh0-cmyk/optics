@@ -42,6 +42,7 @@ export function setOfflineActor(actorId: string) {
 export function clearOfflineActor() {
   activeActorId = null;
   try { window.localStorage.removeItem("nazra-offline-actor"); } catch { /* Local storage may be disabled. */ }
+  try { navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_SHELL" }); } catch { /* Service worker may not be available. */ }
   notify();
 }
 
