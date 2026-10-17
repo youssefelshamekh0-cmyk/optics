@@ -32,7 +32,7 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     event.respondWith(fetch(request).then(async (response) => {
       // Only cache the dashboard document, never login/redirect pages or API data.
-      if (response.ok && !response.redirected && new URL(response.url).pathname === "/dashboard") {
+      if (response.ok && new URL(response.url).pathname === "/dashboard") {
         const cache = await caches.open(PRIVATE_CACHE);
         await cache.put(PRIVATE_SHELL_KEY, response.clone());
       } else if (response.redirected || new URL(response.url).pathname !== "/dashboard") {
