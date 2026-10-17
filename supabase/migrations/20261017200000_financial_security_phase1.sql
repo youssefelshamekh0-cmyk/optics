@@ -5,6 +5,7 @@ create table if not exists public.financial_operation_keys (
   operation_id uuid primary key,
   operation_type text not null check (operation_type in ('expense','payroll_payment')),
   actor_id uuid not null references auth.users(id) on delete restrict,
+  request_fingerprint text not null,
   result_id uuid,
   created_at timestamptz not null default now()
 );
@@ -50,15 +51,17 @@ grant execute on function public.pay_payroll(uuid,uuid,numeric,uuid) to service_
 create or replace function public.pay_payroll_idempotent(
  p_payroll uuid,p_account uuid,p_amount numeric,p_actor uuid,p_operation_id uuid
 ) returns uuid language plpgsql security definer set search_path = '' as $$
-declare v_due numeric; v_balance numeric; v_inserted integer; v_key public.financial_operation_keys%rowtype;
+declare v_due numeric; v_balance numeric; v_inserted integer; v_fingerprint text; v_key public.financial_operation_keys%rowtype;
 begin
  if p_operation_id is null then raise exception 'operation id required'; end if;
- insert into public.financial_operation_keys(operation_id,operation_type,actor_id)
- values(p_operation_id,'payroll_payment',p_actor) on conflict(operation_id) do nothing;
+ v_fingerprint:=md5(concat_ws('|',p_payroll::text,p_account::text,round(p_amount,2)::text));
+ insert into public.financial_operation_keys(operation_id,operation_type,actor_id,request_fingerprint)
+ values(p_operation_id,'payroll_payment',p_actor,v_fingerprint) on conflict(operation_id) do nothing;
  get diagnostics v_inserted = row_count;
  if v_inserted=0 then
    select * into v_key from public.financial_operation_keys where operation_id=p_operation_id for update;
    if v_key.operation_type<>'payroll_payment' or v_key.actor_id<>p_actor then raise exception 'idempotency key conflict'; end if;
+   if v_key.request_fingerprint<>v_fingerprint then raise exception 'idempotency key reused with different payroll details'; end if;
    if v_key.result_id is null then raise exception 'operation is incomplete; retry with a new key after investigation'; end if;
    return v_key.result_id;
  end if;
@@ -89,15 +92,17 @@ create or replace function public.create_expense_from_account(
  p_branch uuid,p_account uuid,p_description text,p_category text,p_amount numeric,p_date date,p_actor uuid,
  p_from_central boolean,p_operation_id uuid
 ) returns uuid language plpgsql security definer set search_path = '' as $$
-declare v_id uuid; v_balance numeric; v_inserted integer; v_key public.financial_operation_keys%rowtype;
+declare v_id uuid; v_balance numeric; v_inserted integer; v_fingerprint text; v_key public.financial_operation_keys%rowtype;
 begin
  if p_operation_id is null then raise exception 'operation id required'; end if;
- insert into public.financial_operation_keys(operation_id,operation_type,actor_id)
- values(p_operation_id,'expense',p_actor) on conflict(operation_id) do nothing;
+ v_fingerprint:=md5(concat_ws('|',p_branch::text,p_account::text,trim(p_description),trim(p_category),round(p_amount,2)::text,p_date::text,p_from_central::text));
+ insert into public.financial_operation_keys(operation_id,operation_type,actor_id,request_fingerprint)
+ values(p_operation_id,'expense',p_actor,v_fingerprint) on conflict(operation_id) do nothing;
  get diagnostics v_inserted = row_count;
  if v_inserted=0 then
    select * into v_key from public.financial_operation_keys where operation_id=p_operation_id for update;
    if v_key.operation_type<>'expense' or v_key.actor_id<>p_actor then raise exception 'idempotency key conflict'; end if;
+   if v_key.request_fingerprint<>v_fingerprint then raise exception 'idempotency key reused with different expense details'; end if;
    if v_key.result_id is null then raise exception 'operation is incomplete; retry with a new key after investigation'; end if;
    return v_key.result_id;
  end if;
