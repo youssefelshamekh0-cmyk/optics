@@ -60,6 +60,7 @@ jobs:
       - name: Install and apply compatible security fixes
         run: |
           npm ci
+          npm pkg set 'overrides.next.postcss=^8.5.23'
           npm install --save-exact next@15.5.28
           npm audit fix || true
       - name: Check lockfile changes
