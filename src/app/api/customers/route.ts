@@ -30,13 +30,15 @@ export async function GET(request: Request) {
   if (phoneQuery) {
     const normalized = normalizeEgyptianPhone(phoneQuery);
     if (!normalized) return Response.json({ customer: null });
-    let phoneSearch: any = admin.from("customers").select("id,full_name,phone,email,notes").eq("phone", normalized.phone);\n    if (allowedCustomerIds) phoneSearch = phoneSearch.in("id", allowedCustomerIds);\n    const { data, error } = await phoneSearch.maybeSingle();
+    let phoneSearch: any = admin.from("customers").select("id,full_name,phone,email,notes").eq("phone", normalized.phone);
+    if (allowedCustomerIds) phoneSearch = phoneSearch.in("id", allowedCustomerIds);\n    const { data, error } = await phoneSearch.maybeSingle();
     if (error) throw error;
     return Response.json({ customer: data });
   }
   let query = admin.from("customers")
     .select("id,full_name,phone,email,notes,created_at,updated_at")
-    .order("created_at", { ascending: false }).limit(100);\n  if (allowedCustomerIds) query = query.in("id", allowedCustomerIds);
+    .order("created_at", { ascending: false }).limit(100);
+  if (allowedCustomerIds) query = query.in("id", allowedCustomerIds);
   const { data, error } = await query;
   if (error) throw error;
   return Response.json({ customers: data ?? [] });
