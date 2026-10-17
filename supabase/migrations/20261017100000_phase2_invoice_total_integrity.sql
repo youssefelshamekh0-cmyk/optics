@@ -31,6 +31,19 @@ begin
     raise exception 'invalid items';
   end if;
 
+  -- Lock all requested stock rows in deterministic order to reduce deadlocks
+  -- when concurrent invoices contain the same products in different orders.
+  perform 1
+  from public.branch_products bp
+  where bp.branch_id = p_branch_id
+    and bp.product_id in (
+      select distinct nullif(items.value->>'productId', '')::uuid
+      from jsonb_array_elements(p_items) as items(value)
+      where nullif(items.value->>'productId', '') is not null
+    )
+  order by bp.product_id
+  for update;
+
   for v_item in select value from jsonb_array_elements(p_items) loop
     begin
       v_name := trim(v_item->>'name');
