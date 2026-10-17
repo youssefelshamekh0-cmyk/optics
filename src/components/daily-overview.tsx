@@ -19,9 +19,9 @@ const methodLabel: Record<string, string> = { cash: "نقدي", card: "بطاق�
 const time = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 const shiftDate = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-export default function DailyOverview() {
+export default function DailyOverview({ initialView = "list" }: { initialView?: "list" | "detail" }) {
   const [data, setData] = useState<Daily | null>(null);
-  const [view, setView] = useState<"list" | "detail">("list");
+  const [view, setView] = useState<"list" | "detail">(initialView);
   const [days, setDays] = useState<DayRow[]>([]);
   const [branchId, setBranchId] = useState("all");
   const [date, setDate] = useState("");
