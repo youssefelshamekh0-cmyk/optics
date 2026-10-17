@@ -42,6 +42,7 @@ export async function GET(request: Request) {
   if(module==="staff"&&!user!.roles.includes("super_admin"))return Response.json({error:"إدارة الموظفين متاحة لمالك البراند فقط"},{status:403});
   const branchId = new URL(request.url).searchParams.get("branchId");
   if (branchId && !branchAllowed(user!,branchId)) return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+  if(!user!.roles.includes("super_admin")&&user!.branchIds.length===0)return Response.json({error:"الحساب غير مرتبط بفرع نشط"},{status:403});
   const admin=getSupabaseAdmin() as any;
   if(module==="central") {
     if(!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
