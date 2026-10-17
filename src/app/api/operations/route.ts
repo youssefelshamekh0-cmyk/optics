@@ -39,6 +39,7 @@ export async function GET(request: Request) {
   }
   const requiredPermission = module==="inventory" ? "inventory.manage" : module==="purchases" ? "purchases.manage" : module==="staff" ? "staff.manage" : "finance.manage";
   const { user, response } = await requirePermission(requiredPermission); if (response) return response;
+  if(module==="staff"&&!user!.roles.includes("super_admin"))return Response.json({error:"إدارة الموظفين متاحة لمالك البراند فقط"},{status:403});
   const branchId = new URL(request.url).searchParams.get("branchId");
   if (branchId && !branchAllowed(user!,branchId)) return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
   const admin=getSupabaseAdmin() as any;
@@ -87,7 +88,7 @@ export async function GET(request: Request) {
     let accounts=admin.from("cash_accounts").select("id,branch_id,name,account_type,payment_method,opening_balance,active,branches(name)").order("name");
     let expenses=admin.from("expenses").select("id,branch_id,description,category,amount,expense_date,status,cash_account_id,branches(name),cash_accounts(name)").order("expense_date",{ascending:false}).limit(100);
     if(branchId){accounts=accounts.eq("branch_id",branchId);expenses=expenses.eq("branch_id",branchId)} else if(!user!.roles.includes("super_admin")){accounts=accounts.in("branch_id",user!.branchIds);expenses=expenses.in("branch_id",user!.branchIds)}
-    const [a,e,t,b,requests,reconciliations]=await Promise.all([accounts,expenses,admin.from("cash_transactions").select("id,cash_account_id,direction,amount,transaction_type,description,created_at,created_by").order("created_at",{ascending:false}).limit(1000),admin.from("branches").select("id,name,code,status").order("name"),admin.from("payroll_advance_requests").select("id,user_id,branch_id,amount,notes,status,created_at,user_profiles(full_name,phone),branches(name)").eq("status","pending").order("created_at"),admin.from("cash_reconciliations").select("id,cash_account_id,expected_balance,counted_balance,difference,notes,created_by,created_at,cash_accounts(name,branch_id,branches(name))").order("created_at",{ascending:false}).limit(100)]);
+    const [a,e,t,b,requests,reconciliations]=await Promise.all([accounts,expenses,admin.from("cash_transactions").select("id,cash_account_id,direction,amount,transaction_type,description,created_at,created_by").order("created_at",{ascending:false}).limit(1000),(()=>{let q=admin.from("branches").select("id,name,code,status").order("name");if(!user!.roles.includes("super_admin"))q=q.in("id",user!.branchIds);return q;})(),user!.roles.includes("super_admin")?admin.from("payroll_advance_requests").select("id,user_id,branch_id,amount,notes,status,created_at,user_profiles(full_name,phone),branches(name)").eq("status","pending").order("created_at"):Promise.resolve({data:[],error:null}),admin.from("cash_reconciliations").select("id,cash_account_id,expected_balance,counted_balance,difference,notes,created_by,created_at,cash_accounts(name,branch_id,branches(name))").order("created_at",{ascending:false}).limit(100)]);
     if(a.error||e.error||t.error||b.error||requests.error||reconciliations.error)throw a.error??e.error??t.error??b.error??requests.error??reconciliations.error;
     const ids:string[]=(a.data??[]).map((x:any)=>x.id); const movements:any[]=(t.data??[]).filter((x:any)=>ids.includes(x.cash_account_id));
     const balances=await Promise.all((a.data??[]).map(async(account:any)=>{const result=await admin.rpc("cash_account_balance",{p_account:account.id});if(result.error)throw result.error;return {...account,balance:Number(result.data??0)};}));
@@ -106,8 +107,9 @@ export async function GET(request: Request) {
     if(branchId)q=q.eq("branch_id",branchId); else if(!user!.roles.includes("super_admin"))q=q.in("branch_id",user!.branchIds);
     const [p,s,products,branches]=await Promise.all([q,admin.from("suppliers").select("id,name,phone,active").eq("active",true).order("name"),admin.from("products").select("id,name,sku,category").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name")]);
     if(p.error||s.error||products.error||branches.error)throw p.error??s.error??products.error??branches.error;
-    const accounts=await admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("active",true).order("name"); if(accounts.error)throw accounts.error;
-    return Response.json({purchases:p.data??[],suppliers:s.data??[],products:products.data??[],branches:branches.data??[],accounts:accounts.data??[]});
+    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("active",true).order("name");if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds);
+    const [accountsR,branchRows]=await Promise.all([accounts,(()=>{let q=admin.from("branches").select("id,name,code,status").order("name");if(!user!.roles.includes("super_admin"))q=q.in("id",user!.branchIds);return q;})()]);if(accountsR.error||branchRows.error)throw accountsR.error??branchRows.error;
+    return Response.json({purchases:p.data??[],suppliers:s.data??[],products:products.data??[],branches:branchRows.data??[],accounts:accountsR.data??[]});
   }
   return Response.json({error:"قسم غير معروف"},{status:400});
 }
