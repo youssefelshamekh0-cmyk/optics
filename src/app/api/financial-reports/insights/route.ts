@@ -155,8 +155,8 @@ export async function GET(request: Request) {
     : { data: [], error: null };
   if (returnedSaleItemsR.error) return Response.json({ error: "تعذر تحميل تكلفة الأصناف المرتجعة" }, { status: 500 });
   const itemById = new Map<string, any>([
-    ...periodItems.map((item: any) => [item.id, item]),
-    ...(returnedSaleItemsR.data ?? []).map((item: any) => [item.id, item]),
+    ...periodItems.map((item: any) => [item.id, item] as [string, any]),
+    ...(returnedSaleItemsR.data ?? []).map((item: any) => [item.id, item] as [string, any]),
   ]);
   const branchBySaleItem = new Map<string, string>();
   for (const item of [...periodItems, ...(returnedSaleItemsR.data ?? [])] as any[]) {
