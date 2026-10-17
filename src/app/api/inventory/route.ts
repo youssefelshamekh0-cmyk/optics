@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   ]);
   if (products.error || branchProducts.error) throw products.error ?? branchProducts.error;
   const stock = new Map((branchProducts.data ?? []).map((row) => [row.product_id, row]));
-  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stock.get(product.id) ?? { quantity: 0, cost_price: 0, reference_price: 0 } })) });
+  return Response.json({ products: (products.data ?? []).map((product) => ({ ...product, stock: stock.has(product.id) ? { ...stock.get(product.id), exists: true } : { quantity: 0, cost_price: 0, reference_price: 0, low_stock_threshold: 3, exists: false } })) });
 }
 
 export async function POST(request: Request) {
