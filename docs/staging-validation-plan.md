@@ -4,8 +4,10 @@
 - Target project: `optics-staging` (Supabase project ref `bvdobfbtjsebdauxghlx`).
 - Production project ref: `jcowjkxepirekkapmivn`; do not apply feature migrations or run write tests there.
 - Current staging schema contains the existing application tables, but Supabase migration history reports only `20261017125800 deliver_sale_collect_balance`. Reconcile the baseline/history before applying the new feature migrations; do not blindly replay the entire migration directory.
+- **Read-only schema audit on 2026-10-17 confirmed additional blockers:** `financial_operation_keys`, `sale_returns`, `stock_takes`, `stock_take_items`, `offline_sync_operations`, `customer_operation_keys`, `cash_reconciliations`, and `inventory_adjustment_operations` are absent from the current staging schema. The first two are referenced by feature migrations but are not created by the corresponding idempotency migrations; the stock/offline/reconciliation tables are expected to be created by their feature migrations. Do not run the migration set until the source/baseline for `financial_operation_keys` and `sale_returns` is identified and restored or a reviewed compatibility migration is prepared.
+- Existing staging metadata confirms `public.create_optics_sale` currently has signature `(p_branch_id uuid, p_customer_id uuid, p_created_by uuid, p_sale_type text, p_items jsonb, p_prescription jsonb, p_final_total numeric, p_initial_payment numeric, p_payment_method text, p_notes text)`; `public.cash_account_balance(p_account uuid)` also exists. These are metadata-only observations, not proof that every feature dependency is compatible.
 - The staging security advisor currently reports 35 tables with RLS enabled but no policies. A read-only grant check showed no direct table grants to `anon` or `authenticated`, and the inspected security-definer RPCs were not executable by those roles. Keep the service-role-only API model and do not add broad RLS policies just to silence the informational advisor.
-- Current Vercel build status has failed because of the build-rate limit; no successful build is verified.
+- Current Vercel build status has failed because of the build-rate limit; no successful Vercel build is verified. GitHub Actions passed TypeScript, production build, and dependency audit for the current feature commit.
 
 ## Migration sequence added in the feature branch
 1. `20261017210000_offline_sync_idempotency.sql`
@@ -17,7 +19,7 @@
 7. `20261017270000_inventory_transfer_dispatch_receipt.sql`
 8. `20261017280000_inventory_adjustment_return_idempotency.sql`
 
-These files are not applied to staging or production. Before staging execution, verify dependency ordering and baseline compatibility, especially the current signature/grants for `financial_operation_keys`, `inventory_transfers`, `stock_movements`, `cash_account_balance`, and `create_optics_sale`.
+These files are not applied to staging or production. Before staging execution, verify dependency ordering and baseline compatibility, especially the current signature/grants for `financial_operation_keys`, `inventory_transfers`, `stock_movements`, `cash_account_balance`, and `create_optics_sale`. In particular, migration `20261017260000_sale_payment_idempotency.sql` alters `financial_operation_keys`, and `20261017280000_inventory_adjustment_return_idempotency.sql` creates an index on `sale_returns(idempotency_key)`; neither prerequisite table currently exists in staging.
 
 ## Functional test matrix
 
@@ -57,6 +59,6 @@ These files are not applied to staging or production. Before staging execution, 
 - Run the complete production build and smoke tests; capture logs, migration output, and backup/restore evidence before merge.
 
 ## Acceptance gate
-No merge/deploy until the migration baseline is reconciled, all migrations succeed on isolated staging, test results are recorded, security review is complete, and a successful build is verified.
+No merge/deploy until the migration baseline is reconciled, prerequisite tables are accounted for, all migrations succeed on isolated staging, test results are recorded, security review is complete, and a successful build is verified.
 
 - Confirm the feature branch dependency audit reports zero vulnerabilities after the compatible Next.js/PostCSS security patch.
