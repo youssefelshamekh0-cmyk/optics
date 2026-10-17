@@ -79,7 +79,7 @@ begin
     select 1 from public.user_roles ur join public.roles r on r.id=ur.role_id
     where ur.user_id=p_actor and r.key='super_admin'
   ) then raise exception 'owner-only cash reconciliation'; end if;
-  v_fingerprint:=pg_catalog.md5(pg_catalog.concat_ws('|',p_cash_account_id::text,round(p_counted_balance,2)::text,pg_catalog.trim(coalesce(p_notes,''))));
+  v_fingerprint:=pg_catalog.md5(pg_catalog.concat_ws('|',p_cash_account_id::text,round(p_counted_balance,2)::text,pg_catalog.btrim(coalesce(p_notes,''))));
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
   select * into v_existing from public.cash_reconciliations where operation_id=p_operation_id for update;
   if found then
@@ -93,7 +93,7 @@ begin
   if not found then raise exception 'cash account not found or inactive'; end if;
   v_expected:=round(public.cash_account_balance(p_cash_account_id),2);
   insert into public.cash_reconciliations(operation_id,cash_account_id,expected_balance,counted_balance,difference,notes,request_fingerprint,created_by)
-  values(p_operation_id,p_cash_account_id,v_expected,round(p_counted_balance,2),round(p_counted_balance-v_expected,2),nullif(pg_catalog.trim(coalesce(p_notes,'')),''),v_fingerprint,p_actor)
+  values(p_operation_id,p_cash_account_id,v_expected,round(p_counted_balance,2),round(p_counted_balance-v_expected,2),nullif(pg_catalog.btrim(coalesce(p_notes,'')),''),v_fingerprint,p_actor)
   returning cash_reconciliations.id into v_id;
   return query select v_id,v_expected,round(p_counted_balance,2),round(p_counted_balance-v_expected,2);
 end;
@@ -115,7 +115,7 @@ declare
   v_id uuid;
 begin
   if p_operation_id is null or p_actor is null or p_source=p_destination or p_quantity is null or p_quantity<1
-     or nullif(pg_catalog.trim(coalesce(p_reason,'')),'') is null then
+     or nullif(pg_catalog.btrim(coalesce(p_reason,'')),'') is null then
     raise exception 'invalid transfer';
   end if;
   if not exists(select 1 from public.user_roles ur join public.roles r on r.id=ur.role_id where ur.user_id=p_actor and r.key='super_admin') then
@@ -124,7 +124,7 @@ begin
       raise exception 'transfer branch access denied';
     end if;
   end if;
-  v_fingerprint:=pg_catalog.md5(pg_catalog.concat_ws('|',p_source::text,p_destination::text,p_product::text,p_quantity::text,pg_catalog.trim(p_reason)));
+  v_fingerprint:=pg_catalog.md5(pg_catalog.concat_ws('|',p_source::text,p_destination::text,p_product::text,p_quantity::text,pg_catalog.btrim(p_reason)));
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
   select * into v_existing from public.inventory_transfers where operation_id=p_operation_id for update;
   if found then
@@ -143,10 +143,10 @@ begin
   update public.branch_products set quantity=quantity-p_quantity,updated_at=now()
     where branch_id=p_source and product_id=p_product;
   insert into public.inventory_transfers(source_branch_id,destination_branch_id,product_id,quantity,reason,created_by,operation_id,request_fingerprint,status,dispatched_at)
-  values(p_source,p_destination,p_product,p_quantity,pg_catalog.trim(p_reason),p_actor,p_operation_id,v_fingerprint,'in_transit',now())
+  values(p_source,p_destination,p_product,p_quantity,pg_catalog.btrim(p_reason),p_actor,p_operation_id,v_fingerprint,'in_transit',now())
   returning id into v_id;
   insert into public.stock_movements(branch_id,product_id,quantity_delta,movement_type,reference_id,reason,created_by)
-  values(p_source,p_product,-p_quantity,'transfer_out',v_id,'إرسال إلى فرع آخر: '||pg_catalog.trim(p_reason),p_actor);
+  values(p_source,p_product,-p_quantity,'transfer_out',v_id,'إرسال إلى فرع آخر: '||pg_catalog.btrim(p_reason),p_actor);
   return query select v_id,'in_transit'::text;
 end;
 $$;
@@ -225,14 +225,14 @@ declare
   v_items_count integer:=0;
   v_adjusted integer:=0;
 begin
-  if p_operation_id is null or p_branch_id is null or p_actor is null or jsonb_typeof(p_items)<>'array'
+  if p_operation_id is null or p_branch_id is null or p_actor is null or p_items is null or jsonb_typeof(p_items)<>'array'
      or jsonb_array_length(p_items)<1 or jsonb_array_length(p_items)>500 then raise exception 'invalid stock count'; end if;
   if not exists(select 1 from public.user_roles ur join public.roles r on r.id=ur.role_id where ur.user_id=p_actor and r.key='super_admin') then
     raise exception 'owner-only stock count';
   end if;
   if not exists(select 1 from public.branches where id=p_branch_id and status='active') then raise exception 'invalid branch'; end if;
   if (select count(*) from jsonb_array_elements(p_items))<>(select count(distinct value->>'productId') from jsonb_array_elements(p_items)) then raise exception 'duplicate product in stock count'; end if;
-  v_fingerprint:=pg_catalog.md5(p_branch_id::text||':'||p_items::text||':'||pg_catalog.trim(coalesce(p_notes,'')));
+  v_fingerprint:=pg_catalog.md5(p_branch_id::text||':'||p_items::text||':'||pg_catalog.btrim(coalesce(p_notes,'')));
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
   select * into v_existing from public.inventory_stock_counts where operation_id=p_operation_id for update;
   if found then
@@ -242,7 +242,7 @@ begin
     return;
   end if;
   insert into public.inventory_stock_counts(operation_id,branch_id,notes,request_fingerprint,created_by)
-  values(p_operation_id,p_branch_id,nullif(pg_catalog.trim(coalesce(p_notes,'')),''),v_fingerprint,p_actor)
+  values(p_operation_id,p_branch_id,nullif(pg_catalog.btrim(coalesce(p_notes,'')),''),v_fingerprint,p_actor)
   returning id into v_count_id;
   for v_item in select value from jsonb_array_elements(p_items) order by value->>'productId' loop
     begin
