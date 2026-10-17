@@ -18,6 +18,24 @@ const returnSchema = z.object({
   }
 });
 
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const { user, response } = await requirePermission("payments.record");
+  if (response) return response;
+  const { id } = await context.params;
+  const admin = getSupabaseAdmin();
+  const { data: sale, error: saleError } = await admin.from("sales")
+    .select("id,branch_id").eq("id", id).maybeSingle();
+  if (saleError) throw saleError;
+  if (!sale) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
+  if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) {
+    return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
+  }
+  const { data, error } = await (admin as any).from("cash_accounts")
+    .select("id,name,payment_method").eq("branch_id", sale.branch_id).eq("active", true).order("name");
+  if (error) throw error;
+  return Response.json({ accounts: data ?? [] });
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { user, response } = await requirePermission("payments.record");
   if (response) return response;
@@ -43,7 +61,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   }
 
-  const { data, error } = await admin.rpc("process_sale_return", {
+  const { data, error } = await (admin as any).rpc("process_sale_return", {
     p_sale_id: id,
     p_items: parsed.data.items,
     p_cash_account_id: parsed.data.cashAccountId,
