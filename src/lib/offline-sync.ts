@@ -285,13 +285,19 @@ export async function syncPendingOperations(): Promise<void> {
         break;
       }
       if (response.ok) {
-        const responseData = data as { saleId?: unknown; invoiceNumber?: unknown; customer?: { id?: unknown } };
+        const responseData = data as { saleId?: unknown; invoiceNumber?: unknown; customer?: { id?: unknown; full_name?: unknown; phone?: unknown; email?: unknown; notes?: unknown; created_at?: unknown; updated_at?: unknown } };
         const result = {
           saleId: typeof responseData.saleId === "string" ? responseData.saleId : undefined,
           invoiceNumber: typeof responseData.invoiceNumber === "number" ? responseData.invoiceNumber : undefined,
           customerId: typeof responseData.customer?.id === "string" ? responseData.customer.id : undefined,
         };
         await putOperation({ ...operation, status: "synced", updatedAt: Date.now(), result, message: "تمت المزامنة بنجاح" });
+        if (operation.type === "customer.create" && responseData.customer && result.customerId) {
+          const cachedCustomers = await getCachedJson<{ customers: Array<{ id?: string }> }>("/api/customers");
+          const customerRow = responseData.customer as Record<string, unknown>;
+          const existingRows = cachedCustomers?.customers ?? [];
+          await cacheJson("/api/customers", { customers: [customerRow, ...existingRows.filter(row => row.id !== result.customerId)].slice(0, 100) });
+        }
         if (operation.type === "customer.create" && operation.localCustomerId && result.customerId) {
           const dependents = (await getActorOutbox()).filter(item =>
             item.type === "sale.create" && item.status === "pending" && item.payload.customerId === operation.localCustomerId
