@@ -34,6 +34,7 @@ begin
      and not exists(select 1 from public.user_branch_access where user_id=p_actor and branch_id=p_branch_id) then
     raise exception 'adjustment branch access denied';
   end if;
+  if not exists(select 1 from public.branches where id=p_branch_id and status='active') then raise exception 'adjustment branch inactive'; end if;
   v_fingerprint:=pg_catalog.md5(pg_catalog.jsonb_build_object(
     'branchId',p_branch_id,'productId',p_product_id,'delta',p_delta,'reason',pg_catalog.btrim(p_reason),'actor',p_actor
   )::text);
