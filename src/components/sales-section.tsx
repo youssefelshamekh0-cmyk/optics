@@ -67,6 +67,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [returnCashAccountId, setReturnCashAccountId] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [alreadyReturned, setAlreadyReturned] = useState<Record<string, number>>({});
   const [returnLoading, setReturnLoading] = useState(false);
 
   useEffect(() => { if (!branchId && availableBranches.length) setBranchId(availableBranches[0].id); }, [availableBranches, branchId]);
@@ -191,6 +192,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     try {
       const result = await requestJson(`/api/sales/${sale.id}/returns`);
       setReturnAccounts(result.accounts ?? []);
+      setAlreadyReturned(result.returnedQuantities ?? {});
       setReturnCashAccountId(result.accounts?.[0]?.id ?? "");
       setReturnReason("");
       setReturnQuantities({});
@@ -205,6 +207,10 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     event.preventDefault();
     const selectedItems = sale.items.filter((item) => Number(returnQuantities[item.id]) > 0)
       .map((item) => ({ saleItemId: item.id, quantity: Number(returnQuantities[item.id]) }));
+    if (selectedItems.some((selected) => {
+      const item = sale.items.find((row) => row.id === selected.saleItemId)!;
+      return selected.quantity > item.quantity - (alreadyReturned[item.id] ?? 0);
+    })) { setError("الكمية المختارة أكبر من الكمية المتبقية بعد المرتجعات السابقة"); return; }
     if (!selectedItems.length) { setError("اختر بندًا واحدًا على الأقل وحدد الكمية المرتجعة"); return; }
     if (!returnCashAccountId) { setError("اختر خزنة رد المبلغ"); return; }
     setBusy(true); setError(""); setNotice("");
@@ -261,7 +267,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
                   <span>{item.item_name} · المباع {item.quantity}</span>
                   <input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1"
                     value={returnQuantities[item.id] ?? 0}
-                    onChange={(event) => setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) }))} />
+                    onChange={(event) => setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(Math.max(0, item.quantity - (alreadyReturned[item.id] ?? 0)), Number(event.target.value) || 0)) }))} />
                 </label>)}
                 <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => setReturnCashAccountId(event.target.value)}>
                   <option value="">اختر الخزنة</option>{returnAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {methodLabels[account.payment_method] ?? account.payment_method}</option>)}
