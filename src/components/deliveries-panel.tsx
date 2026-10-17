@@ -30,15 +30,15 @@ function printHtml(title: string, body: string, logoDataUrl: string | null) {
   document.body.appendChild(frame);
 }
 
-function printList(rows: Sale[], branchName: string, filters: string) {
+function printList(rows: Sale[], branchName: string, filters: string, logoDataUrl: string | null) {
   const total = rows.reduce((s, r) => s + Number(r.grand_total), 0), paid = rows.reduce((s, r) => s + r.paid_amount, 0), due = rows.reduce((s, r) => s + r.due_amount, 0);
   printHtml("قائمة التسليمات", `<h1>قائمة التسليمات</h1><div class="meta">${esc(branchName)} — ${esc(filters)} — طُبعت ${esc(new Date().toLocaleString("ar-EG"))}</div>
   <table><thead><tr><th>#</th><th>الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الهاتف</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
   ${rows.map((r, i) => `<tr><td>${i + 1}</td><td>#${r.invoice_number}</td><td>${esc(dateOf(r.created_at))}</td><td>${esc(r.customers?.full_name)}</td><td>${esc(r.customers?.phone)}</td><td>${esc(r.branches?.name)}</td><td>${esc(money(Number(r.grand_total)))}</td><td>${r.due_amount > 0 ? esc(money(r.due_amount)) : "—"}</td><td>${esc(statusLabel[r.delivery_status])}</td></tr>`).join("") || `<tr><td colspan="9">لا توجد فواتير مطابقة</td></tr>`}</tbody></table>
-  <div class="totals"><div>عدد الفواتير<b>${rows.length}</b></div><div>الإجمالي<b>${esc(money(total))}</b></div><div class="due">المتبقي<b>${esc(money(due))}</b></div></div><div class="meta" style="margin-top:8px">المدفوع: ${esc(money(paid))}</div>`, brandLogo);
+  <div class="totals"><div>عدد الفواتير<b>${rows.length}</b></div><div>الإجمالي<b>${esc(money(total))}</b></div><div class="due">المتبقي<b>${esc(money(due))}</b></div></div><div class="meta" style="margin-top:8px">المدفوع: ${esc(money(paid))}</div>`, logoDataUrl);
 }
 
-function printSlip(s: Sale) {
+function printSlip(s: Sale, logoDataUrl: string | null) {
   const items = s.sale_items ?? [];
   printHtml(`فاتورة ${s.invoice_number}`, `<h1>فاتورة #${s.invoice_number}</h1><div class="meta">${esc(s.branches?.name)} — ${esc(dateOf(s.created_at))} — الحالة: ${esc(statusLabel[s.delivery_status])}</div>
   <h2>العميل</h2><table><tbody><tr><th>الاسم</th><td>${esc(s.customers?.full_name)}</td><th>الهاتف</th><td>${esc(s.customers?.phone)}</td></tr></tbody></table>
@@ -105,7 +105,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   return (
     <section className="panel operations-panel deliveries-panel">
       <div className="section-heading"><div><p className="eyebrow">دورة الطلب</p><h2>التسليمات</h2></div>
-        <button type="button" className="row-action" onClick={() => printList(rows, branchName, filterText)} disabled={!rows.length}>🖨 طباعة القائمة ({rows.length})</button></div>
+        <button type="button" className="row-action" onClick={() => printList(rows, branchName, filterText, brandLogo)} disabled={!rows.length}>🖨 طباعة القائمة ({rows.length})</button></div>
       {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
       <div className="ops-toolbar">
         <label className="ops-branch">الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{available.map((b) => <option value={b.id} key={b.id}>{b.name}</option>)}</select></label>
@@ -120,7 +120,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
         {rows.map((s) => <tr key={s.id}><td>#{s.invoice_number}<small>{dateOf(s.created_at)}</small></td><td>{s.customers?.full_name}<small>{s.customers?.phone}</small></td><td>{s.branches?.name}</td><td>{money(Number(s.grand_total))}</td><td>{s.due_amount > 0 ? <strong className="due">{money(s.due_amount)}</strong> : "—"}</td>
           <td><span className={`status-pill s-${s.delivery_status}`}>{statusLabel[s.delivery_status]}</span></td>
           <td><select className="status-select" aria-label={`حالة الفاتورة ${s.invoice_number}`} value={s.delivery_status} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => void updateStatus(s.id, e.target.value)}>{STATUSES.map((x) => <option value={x} key={x}>{statusLabel[x]}</option>)}</select></td>
-          <td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered"} onClick={() => { setDeliveryDialogSaleId(s.id); setDiscountDraft("0"); }}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
+          <td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered"} onClick={() => { setDeliveryDialogSaleId(s.id); setDiscountDraft("0"); }}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s, brandLogo)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
         {rows.length === 0 && <tr><td colSpan={9} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
       </tbody></table></div>
       <p className="footnote">كل تغيير حالة يُحفظ في سجل تسليم الفاتورة. القائمة تعرض آخر 200 فاتورة غير ملغاة.</p>
