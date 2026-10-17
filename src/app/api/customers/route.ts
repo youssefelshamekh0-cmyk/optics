@@ -15,18 +15,28 @@ const customerSchema = z.object({
 export async function GET(request: Request) {
   const { user, response } = await requirePermission("customers.read");
   if (response) return response;
+  const admin = getSupabaseAdmin();
+  let allowedCustomerIds: string[] | null = null;
+  if (!user!.roles.includes("super_admin")) {
+    const [sales, createdCustomers] = await Promise.all([
+      user!.branchIds.length ? admin.from("sales").select("customer_id").in("branch_id", user!.branchIds).limit(10000) : Promise.resolve({ data: [], error: null }),
+      admin.from("customers").select("id").eq("created_by", user!.id).limit(10000),
+    ]);
+    if (sales.error || createdCustomers.error) throw sales.error ?? createdCustomers.error;
+    allowedCustomerIds = [...new Set([...(sales.data ?? []).map((row: any) => row.customer_id), ...(createdCustomers.data ?? []).map((row: any) => row.id)].filter(Boolean))];
+    if (!allowedCustomerIds.length) return Response.json({ customers: [], customer: null });
+  }
   const phoneQuery = new URL(request.url).searchParams.get("phone");
   if (phoneQuery) {
     const normalized = normalizeEgyptianPhone(phoneQuery);
     if (!normalized) return Response.json({ customer: null });
-    const { data, error } = await getSupabaseAdmin().from("customers")
-      .select("id,full_name,phone,email,notes").eq("phone", normalized.phone).maybeSingle();
+    let phoneSearch: any = admin.from("customers").select("id,full_name,phone,email,notes").eq("phone", normalized.phone);\n    if (allowedCustomerIds) phoneSearch = phoneSearch.in("id", allowedCustomerIds);\n    const { data, error } = await phoneSearch.maybeSingle();
     if (error) throw error;
     return Response.json({ customer: data });
   }
-  let query = getSupabaseAdmin().from("customers")
+  let query = admin.from("customers")
     .select("id,full_name,phone,email,notes,created_at,updated_at")
-    .order("created_at", { ascending: false }).limit(100);
+    .order("created_at", { ascending: false }).limit(100);\n  if (allowedCustomerIds) query = query.in("id", allowedCustomerIds);
   const { data, error } = await query;
   if (error) throw error;
   return Response.json({ customers: data ?? [] });
