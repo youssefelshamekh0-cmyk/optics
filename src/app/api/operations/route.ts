@@ -126,25 +126,15 @@ const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("purchase"),invoiceNumber:z.string().trim().min(1).max(100),supplierName:z.string().trim().min(2).max(160),supplierPhone:z.string().max(40).default(""),branchId:uuid,items:z.array(z.object({productId:uuid,quantity:z.number().int().min(1),unitCost:z.number().min(0)})).min(1).max(100),paidAmount:z.number().min(0),cashAccountId:uuid.nullable().optional()}),
  z.object({action:z.literal("centralDeposit"),cashAccountId:uuid.nullable().optional()}),
  z.object({action:z.literal("cashReconcile"),cashAccountId:uuid,operationId:uuid,countedBalance:z.number().min(0).max(1000000000),notes:z.string().trim().max(500).default("")}),
- z.object({action:z.literal("stockCount"),branchId:uuid,operationId:uuid,items:z.array(z.object({productId:uuid,countedQuantity:z.number().int().min(0).max(100000)})).min(1).max(500),notes:z.string().trim().max(500).default("")}),
 ]);
 
 export async function POST(request:Request){
  const parsed=actionSchema.safeParse(await request.json().catch(()=>null)); if(!parsed.success)return Response.json({error:"راجع البيانات المدخلة"},{status:400});
- const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"||action==="transferReceive"||action==="stockCount"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
+ const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"||action==="transferReceive"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId=""; let actionResult:any=null;
- if(action==="stockCount"){
-   if(!user!.roles.includes("super_admin"))return Response.json({error:"الجرد الفعلي متاح لمالك البراند فقط حاليًا"},{status:403});
-   if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
-   const {data,error}=await admin.rpc("record_inventory_stock_count",{p_operation_id:parsed.data.operationId,p_branch_id:parsed.data.branchId,p_items:parsed.data.items,p_actor:user!.id,p_notes:parsed.data.notes});
-   if(error?.message.includes("operation id conflict"))return Response.json({error:"معرّف الجرد مستخدم لبيانات مختلفة"},{status:409});
-   if(error?.message.includes("duplicate product"))return Response.json({error:"لا تكرر الصنف في نفس عملية الجرد"},{status:400});
-   if(error?.message.includes("product not stocked"))return Response.json({error:"أحد الأصناف غير موجود في مخزون الفرع"},{status:409});
-   if(error)throw error;
-   actionResult=Array.isArray(data)?data[0]:data;entityId=actionResult?.count_id??parsed.data.operationId;
- }else if(action==="cashReconcile"){
+ if(action==="cashReconcile"){
    if(!user!.roles.includes("super_admin"))return Response.json({error:"مطابقة الخزائن متاحة لمالك البراند فقط"},{status:403});
    const {data,error}=await admin.rpc("record_cash_reconciliation",{p_operation_id:parsed.data.operationId,p_cash_account_id:parsed.data.cashAccountId,p_counted_balance:parsed.data.countedBalance,p_actor:user!.id,p_notes:parsed.data.notes});
    if(error?.message.includes("operation id conflict"))return Response.json({error:"معرّف المطابقة مستخدم لبيانات مختلفة"},{status:409});
@@ -232,6 +222,6 @@ export async function POST(request:Request){
  }else if(action==="purchase"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"||action==="stockCount"||action==="transfer"||action==="transferReceive"?{result:actionResult}:{});
- return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="stockCount"?{stockCount:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive"?{result:actionResult}:{});
+ return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
 }
