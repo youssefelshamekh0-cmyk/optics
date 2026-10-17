@@ -42,6 +42,8 @@ declare
   v_already_returned integer;
   v_line_refund numeric(12,2);
   v_total_refund numeric(12,2) := 0;
+  v_reference_total numeric(12,2) := 0;
+  v_effective_unit numeric(12,2);
   v_paid numeric(12,2);
   v_refunded numeric(12,2);
   v_return_id uuid;
@@ -66,6 +68,12 @@ begin
     select 1 from public.cash_accounts ca
     where ca.id = p_cash_account_id and ca.branch_id = v_sale.branch_id and ca.active
   ) then raise exception 'invalid refund cash account'; end if;
+
+  select coalesce(sum(si.line_total), 0)::numeric(12,2)
+  into v_reference_total
+  from public.sale_items si
+  where si.sale_id = p_sale_id;
+  if v_reference_total <= 0 then raise exception 'sale has no refundable line total'; end if;
 
   -- Lock item rows in deterministic order before checking previously returned quantities.
   for v_item in
@@ -93,7 +101,8 @@ begin
     if v_already_returned + v_requested_qty > v_sale_item.quantity then
       raise exception 'return quantity exceeds sold quantity';
     end if;
-    v_total_refund := v_total_refund + round(v_requested_qty * v_sale_item.unit_price, 2);
+    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 2);
+    v_total_refund := v_total_refund + round(v_requested_qty * v_effective_unit, 2);
   end loop;
 
   select coalesce(sum(sp.amount),0) into v_paid
@@ -119,9 +128,10 @@ begin
     where si.id = (v_item->>'saleItemId')::uuid and si.sale_id = p_sale_id;
 
     v_requested_qty := (v_item->>'quantity')::integer;
-    v_line_refund := round(v_requested_qty * v_sale_item.unit_price, 2);
+    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 2);
+    v_line_refund := round(v_requested_qty * v_effective_unit, 2);
     insert into public.sale_return_items(return_id, sale_item_id, quantity, unit_refund)
-    values(v_return_id, v_sale_item.id, v_requested_qty, v_sale_item.unit_price);
+    values(v_return_id, v_sale_item.id, v_requested_qty, v_effective_unit);
 
     if v_sale_item.product_id is not null then
       update public.branch_products
