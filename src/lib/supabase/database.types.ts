@@ -951,7 +951,7 @@ export type Database = {
       create_customer_idempotent: {
         Args: {
           p_operation_id: string
-          p_actor: string
+          p_actor_id: string
           p_full_name: string
           p_phone: string
           p_email: string
