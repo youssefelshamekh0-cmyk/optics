@@ -88,7 +88,8 @@ const canCache = (url: URL) => url.origin === window.location.origin && (
   url.pathname === "/api/sales" ||
   url.pathname === "/api/sales/products" ||
   url.pathname === "/api/sales/lens-pricing" ||
-  url.pathname === "/api/sales/customers"
+  url.pathname === "/api/sales/customers" ||
+  url.pathname === "/api/customers"
 );
 
 export async function getCachedJson<T>(key: string): Promise<T | null> {
@@ -270,8 +271,8 @@ export async function syncPendingOperations(): Promise<void> {
         const mapped = await getCachedJson<{ serverId: string }>("customer-map:" + payloadToSend.customerId);
         if (mapped?.serverId) payloadToSend.customerId = mapped.serverId;
         else {
-          const localCustomerOperation = operations.find(item => item.type === "customer.create" && item.localCustomerId === payloadToSend.customerId);
-          if (localCustomerOperation && localCustomerOperation.status !== "synced") {
+          const localCustomerOperation = allOperations.find(item => item.type === "customer.create" && item.localCustomerId === payloadToSend.customerId);
+          if (localCustomerOperation) {
             await putOperation({ ...operation, status: "pending", updatedAt: Date.now(), message: "بانتظار مزامنة بيانات العميل أولاً" });
             continue;
           }
