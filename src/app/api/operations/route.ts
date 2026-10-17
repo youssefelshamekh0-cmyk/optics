@@ -37,7 +37,8 @@ export async function GET(request: Request) {
     if (accountsRes.error) throw accountsRes.error;
     return Response.json({ accounts: accountsRes.data ?? [], sales:(data??[]).map((s:any)=>{const p=paid.get(s.id)??0;const due=Math.round((Number(s.grand_total)-p)*100)/100;return {...s,paid_amount:Math.round(p*100)/100,due_amount:due,payment_balance_error:due < -0.009};}) });
   }
-  const { user, response } = await owner(request); if (response) return response;
+  const requiredPermission = module==="inventory" ? "inventory.manage" : module==="purchases" ? "purchases.manage" : module==="staff" ? "staff.manage" : "finance.manage";
+  const { user, response } = await requirePermission(requiredPermission); if (response) return response;
   const branchId = new URL(request.url).searchParams.get("branchId");
   if (branchId && !branchAllowed(user!,branchId)) return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
   const admin=getSupabaseAdmin() as any;
