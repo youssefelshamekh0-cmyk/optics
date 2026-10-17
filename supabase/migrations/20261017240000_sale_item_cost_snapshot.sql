@@ -40,7 +40,7 @@ begin
       where id=nullif(new.technical_details->'left'->>'priceId','')::uuid and branch_id=v_branch and active;
     if v_right_cost is not null and v_left_cost is not null then
       new.unit_cost:=round(v_right_cost+v_left_cost,2);
-      new.unit_cost_is_estimated:=false;
+      new.unit_cost_is_estimated:=(v_right_cost<=0 or v_left_cost<=0);
     else
       new.unit_cost:=0;
       new.unit_cost_is_estimated:=true;
@@ -57,7 +57,7 @@ begin
    where branch_id=v_branch and product_id=new.product_id;
   if not found then raise exception 'product cost not configured for branch'; end if;
   new.unit_cost := coalesce(v_cost,0);
-  new.unit_cost_is_estimated := false;
+  new.unit_cost_is_estimated := coalesce(v_cost,0)<=0;
   return new;
 end;
 $$;
