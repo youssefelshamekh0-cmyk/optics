@@ -15,6 +15,7 @@
 5. `20261017250000_cash_reconciliation.sql`
 6. `20261017260000_sale_payment_idempotency.sql`
 7. `20261017270000_inventory_transfer_dispatch_receipt.sql`
+8. `20261017280000_inventory_adjustment_return_idempotency.sql`
 
 These files are not applied to staging or production. Before staging execution, verify dependency ordering and baseline compatibility, especially the current signature/grants for `financial_operation_keys`, `inventory_transfers`, `stock_movements`, `cash_account_balance`, and `create_optics_sale`.
 
@@ -34,6 +35,8 @@ These files are not applied to staging or production. Before staging execution, 
 - Record cash counts below, equal to, and above book balance; confirm signed variance and immutable history without automatic ledger mutation.
 - Submit the same payment operation ID twice; confirm one `sale_payments` row and one matching cash transaction.
 - Submit the same operation ID with changed amount/account; confirm conflict rather than duplicate movement.
+- Retry a stock adjustment after a simulated timeout; verify one stock movement, and reuse the key with changed quantity to confirm a conflict.
+- Reuse a return operation ID across two invoices; verify the global unique constraint prevents a second refund.
 - Race two payments against the same remaining balance; confirm row locking prevents over-collection.
 - Confirm collection reports attribute payments to the payment date even when the invoice was created earlier.
 
