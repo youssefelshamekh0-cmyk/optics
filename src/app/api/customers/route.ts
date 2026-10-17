@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   if (error?.message.includes("customer phone already exists")) return Response.json({ error: "رقم الموبايل مسجل لعميل بالفعل" }, { status: 409 });
   if (error?.message.includes("idempotency key reused")) return Response.json({ error: "معرّف العملية مستخدم لبيانات عميل مختلفة" }, { status: 409 });
   if (error) throw error;
-  const data = customerData as { id: string; full_name: string; phone: string | null; email: string | null; notes: string | null; created_at: string; updated_at: string };
+  const data = customerData as unknown as { id: string; full_name: string; phone: string | null; email: string | null; notes: string | null; created_at: string; updated_at: string };
   await audit(user!.id, "customer.create", "customer", data.id, { operationId });
   return Response.json({ customer: data, operationId }, { status: 201 });
 }
