@@ -1,0 +1,58 @@
+-- Atomically complete delivery and collect the entire remaining balance into the selected branch cash account.
+create or replace function public.deliver_sale_and_collect_balance(p_sale_id uuid,p_actor uuid,p_cash_account uuid default null,p_discount_amount numeric(12,2) default 0)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_total numeric(12,2);
+  v_subtotal numeric(12,2);
+  v_status text;
+  v_branch uuid;
+  v_paid numeric(12,2);
+  v_due numeric(12,2);
+  v_account uuid;
+  v_method text;
+  v_payment uuid;
+begin
+  select total_amount,delivery_status,branch_id
+    into v_subtotal,v_status,v_branch
+    from public.sales
+    where id=p_sale_id
+    for update;
+  if not found then raise exception 'sale not found'; end if;
+  if v_status='cancelled' then raise exception 'cancelled sale'; end if;
+  if v_status='delivered' then raise exception 'already delivered'; end if;
+
+  select coalesce(sum(amount),0) into v_paid
+    from public.sale_payments where sale_id=p_sale_id;
+  if p_discount_amount < 0 or p_discount_amount > v_subtotal-v_paid then raise exception 'invalid discount amount'; end if;
+  update public.sales set discount_amount=p_discount_amount,updated_at=now() where id=p_sale_id;
+  v_total:=v_subtotal-p_discount_amount;
+  v_due:=round(v_total-v_paid,2);
+  if v_due < 0 then raise exception 'invoice balance is negative'; end if;
+
+  if v_due > 0 then
+    if p_cash_account is null then raise exception 'cash account not configured'; end if;
+    select id,payment_method into v_account,v_method
+      from public.cash_accounts
+      where id=p_cash_account and branch_id=v_branch and active;
+    if v_account is null then raise exception 'cash account not configured'; end if;
+
+    insert into public.sale_payments(sale_id,amount,payment_method,notes,received_by)
+      values(p_sale_id,v_due,v_method,'تحصيل المتبقي عند التسليم',p_actor)
+      returning id into v_payment;
+    insert into public.cash_transactions(cash_account_id,direction,amount,transaction_type,reference_id,description,created_by)
+      values(v_account,'in',v_due,'sale_payment',v_payment,'تحصيل المتبقي للفاتورة #'||p_sale_id,p_actor);
+  end if;
+
+  update public.sales set delivery_status='delivered',updated_at=now() where id=p_sale_id;
+  insert into public.sale_delivery_events(sale_id,from_status,to_status,changed_by,notes)
+    values(p_sale_id,v_status,'delivered',p_actor,'تم التسليم بعد مراجعة الفاتورة وتطبيق الخصم وتسجيل المتبقي في حساب الخزنة المختار');
+  return v_payment;
+end;
+$$;
+
+revoke all on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid,numeric) from public,anon,authenticated;
+grant execute on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid,numeric) to service_role;

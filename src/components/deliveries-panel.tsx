@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
 type Item = { item_name: string; quantity: number; unit_price: number; line_total: number };
+type CashAccount = { id: string; branch_id: string; name: string; payment_method: string };
 type Sale = {
-  id: string; invoice_number: number; branch_id: string; delivery_status: "pending" | "processing" | "ready" | "delivered"; grand_total: number; paid_amount: number; due_amount: number; notes: string | null; created_at: string;
+  id: string; invoice_number: number; branch_id: string; total_amount: number; discount_amount: number; delivery_status: "pending" | "processing" | "ready" | "delivered"; grand_total: number; paid_amount: number; due_amount: number; notes: string | null; created_at: string;
   customers: { full_name: string; phone: string } | null; branches: { name: string } | null; sale_items?: Item[];
 };
 const STATUSES = ["pending", "processing", "ready", "delivered"] as const;
@@ -50,6 +51,10 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   const available = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && (isOwner || branchIds.includes(b.id))), [branches, branchIds, isOwner]);
   const [branchId, setBranchId] = useState("");
   const [sales, setSales] = useState<Sale[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
+  const [deliveryDialogSaleId, setDeliveryDialogSaleId] = useState<string | null>(null);
+  const [discountDraft, setDiscountDraft] = useState("0");
   const [status, setStatus] = useState<"all" | (typeof STATUSES)[number]>("all");
   const [payment, setPayment] = useState<"all" | "due" | "paid">("all");
   const [search, setSearch] = useState("");
@@ -61,10 +66,22 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
       const r = await fetch(`/api/operations?module=deliveries${branchId ? `&branchId=${encodeURIComponent(branchId)}` : ""}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تحميل التسليمات");
-      setSales(j.sales ?? []); setError("");
+      setSales(j.sales ?? []); setCashAccounts(j.accounts ?? []); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التسليمات"); }
   }, [branchId]);
   useEffect(() => { void load(); }, [load]);
+
+  async function deliverAndCollect(saleId: string) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const r = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deliverAndCollect", saleId, cashAccountId: selectedAccounts[saleId] ?? "", discountAmount: Number(discountDraft || 0) }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "تعذر تسليم الفاتورة وتسجيل المتبقي");
+      setSelectedAccounts((current) => { const next = { ...current }; delete next[saleId]; return next; });
+      setDeliveryDialogSaleId(null); setDiscountDraft("0");
+      setNotice("تم تسليم الفاتورة وتسجيل الخصم والتحصيل في حساب الخزنة المختار"); await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسليم الفاتورة"); } finally { setBusy(false); }
+  }
 
   async function updateStatus(saleId: string, next: string) {
     setBusy(true); setError(""); setNotice("");
@@ -97,14 +114,51 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
         <button type="button" className={`status-chip ${status === "all" ? "on" : ""}`} aria-pressed={status === "all"} onClick={() => setStatus("all")}>الكل <b>{bySearchAndPayment.length}</b></button>
         {STATUSES.map((k) => <button type="button" key={k} className={`status-chip s-${k} ${status === k ? "on" : ""}`} aria-pressed={status === k} onClick={() => setStatus(k)}>{statusLabel[k]} <b>{counts[k]}</b></button>)}
       </div>
-      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th><th>تحديث التسليم</th><th>طباعة</th></tr></thead><tbody>
+      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th><th>تحديث التسليم</th><th>حساب الخزنة للتحصيل</th><th>تسليم</th><th>طباعة</th></tr></thead><tbody>
         {rows.map((s) => <tr key={s.id}><td>#{s.invoice_number}<small>{dateOf(s.created_at)}</small></td><td>{s.customers?.full_name}<small>{s.customers?.phone}</small></td><td>{s.branches?.name}</td><td>{money(Number(s.grand_total))}</td><td>{s.due_amount > 0 ? <strong className="due">{money(s.due_amount)}</strong> : "—"}</td>
           <td><span className={`status-pill s-${s.delivery_status}`}>{statusLabel[s.delivery_status]}</span></td>
           <td><select className="status-select" aria-label={`حالة الفاتورة ${s.invoice_number}`} value={s.delivery_status} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => void updateStatus(s.id, e.target.value)}>{STATUSES.map((x) => <option value={x} key={x}>{statusLabel[x]}</option>)}</select></td>
-          <td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
-        {rows.length === 0 && <tr><td colSpan={8} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
+          <td>{s.due_amount > 0 ? <select className="status-select" aria-label={`حساب خزنة تحصيل الفاتورة ${s.invoice_number}`} value={selectedAccounts[s.id] ?? ""} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => setSelectedAccounts((current) => ({ ...current, [s.id]: e.target.value }))}><option value="">اختر حساب الخزنة</option>{cashAccounts.filter((account) => account.branch_id === s.branch_id).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select> : "لا يوجد متبقي"}</td><td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered" || (s.due_amount > 0 && !selectedAccounts[s.id])} onClick={() => { setDeliveryDialogSaleId(s.id); setDiscountDraft("0"); }}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
+        {rows.length === 0 && <tr><td colSpan={10} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
       </tbody></table></div>
       <p className="footnote">كل تغيير حالة يُحفظ في سجل تسليم الفاتورة. القائمة تعرض آخر 200 فاتورة غير ملغاة.</p>
+      {deliveryDialogSaleId && (() => {
+        const sale = sales.find((row) => row.id === deliveryDialogSaleId);
+        if (!sale) return null;
+        const discount = Number(discountDraft || 0);
+        const newTotal = Number(sale.total_amount) - discount;
+        const newDue = newTotal - Number(sale.paid_amount);
+        const accountsForSale = cashAccounts.filter((account) => account.branch_id === sale.branch_id);
+        return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setDeliveryDialogSaleId(null); }}>
+          <section className="panel" role="dialog" aria-modal="true" aria-labelledby="delivery-confirm-title" style={{ width: "min(720px, 96vw)", maxHeight: "90vh", overflowY: "auto", margin: "auto" }}>
+            <div className="section-heading"><div><p className="eyebrow">مراجعة قبل التسليم</p><h2 id="delivery-confirm-title">تسليم الفاتورة #{sale.invoice_number}</h2></div><button type="button" className="row-action" disabled={busy} onClick={() => setDeliveryDialogSaleId(null)}>إغلاق</button></div>
+            <div className="ops-toolbar">
+              <div><small>العميل</small><strong>{sale.customers?.full_name ?? "—"}</strong></div>
+              <div><small>الفرع</small><strong>{sale.branches?.name ?? "—"}</strong></div>
+              <div><small>رقم الهاتف</small><strong>{sale.customers?.phone ?? "—"}</strong></div>
+            </div>
+            <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>
+              {(sale.sale_items ?? []).map((item, index) => <tr key={`${item.item_name}-${index}`}><td>{item.item_name}</td><td>{item.quantity}</td><td>{money(Number(item.unit_price))}</td><td>{money(Number(item.line_total))}</td></tr>)}
+              {!(sale.sale_items ?? []).length && <tr><td colSpan={4}>لا توجد تفاصيل أصناف متاحة.</td></tr>}
+            </tbody></table></div>
+            <div className="ops-toolbar">
+              <div><small>إجمالي الأصناف قبل الخصم</small><strong>{money(Number(sale.total_amount))}</strong></div>
+              <label>الخصم على الفاتورة<input type="number" min="0" max={Math.max(0, Number(sale.total_amount) - Number(sale.paid_amount))} step="0.01" value={discountDraft} onChange={(event) => setDiscountDraft(event.target.value)} /></label>
+              <div><small>الإجمالي بعد الخصم</small><strong>{money(newTotal)}</strong></div>
+              <div><small>المدفوع سابقًا</small><strong>{money(Number(sale.paid_amount))}</strong></div>
+              <div><small>المتبقي المطلوب تحصيله</small><strong>{money(newDue)}</strong></div>
+            </div>
+            {newDue > 0.009 ? <label>حساب الخزنة / وسيلة الدفع
+              <select value={selectedAccounts[sale.id] ?? ""} onChange={(event) => setSelectedAccounts((current) => ({ ...current, [sale.id]: event.target.value }))}>
+                <option value="">اختر حساب الخزنة</option>
+                {accountsForSale.map((account) => <option key={account.id} value={account.id}>{account.name} — {({cash:"نقدي",card:"بطاقة",instapay:"إنستاباي",other:"أخرى"} as Record<string,string>)[account.payment_method] ?? account.payment_method}</option>)}
+              </select>
+            </label> : <p>لا يوجد مبلغ متبقٍ للتحصيل بعد الخصم.</p>}
+            {discount < 0 || !Number.isFinite(discount) || discount > Number(sale.total_amount) - Number(sale.paid_amount) ? <div className="notice error">قيمة الخصم غير صحيحة.</div> : null}
+            <div className="section-heading"><span>سيتم تسجيل الخصم والتحصيل وتحديث حالة الفاتورة معًا.</span><button type="button" className="primary-button" disabled={busy || discount < 0 || !Number.isFinite(discount) || discount > Number(sale.total_amount) || (newDue > 0.009 && !selectedAccounts[sale.id])} onClick={() => void deliverAndCollect(sale.id)}>{busy ? "جارٍ الحفظ…" : "تأكيد التسليم"}</button></div>
+          </section>
+        </div>;
+      })()}
     </section>
   );
 }

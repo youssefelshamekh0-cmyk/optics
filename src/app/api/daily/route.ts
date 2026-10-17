@@ -45,15 +45,15 @@ export async function GET(request: Request) {
   const branchIds: string[] = requested && requested !== "all" ? [requested] : allowed;
   if (params.get("mode") === "days") {
     if (!isOwner) return Response.json({ error: "هذه الشاشة متاحة لمالك البراند" }, { status: 403 });
-    if (!requested || requested === "all") return Response.json({ error: "اختر فرعًا لعرض يومياته" }, { status: 400 });
+    if (!branchIds.length) return Response.json({ role: "owner", today, branches: branches ?? [], branchId: requested ?? "all", days: [] });
     const startDate = addDays(today, -29);
     const startAt = cairoMidnight(startDate).toISOString();
     const endAt = cairoMidnight(addDays(today, 1)).toISOString();
     const [salesRes, shiftsRes, expenseRes, accountRes] = await Promise.all([
-      fetchAll(admin.from("sales").select("id,created_at,grand_total,delivery_status").eq("branch_id", requested).gte("created_at", startAt).lt("created_at", endAt)),
-      fetchAll(admin.from("seller_shifts").select("id,opened_at,status,variance,closed_at").eq("branch_id", requested).gte("opened_at", startAt).lt("opened_at", endAt)),
-      fetchAll(admin.from("expenses").select("id,expense_date,amount,status").eq("branch_id", requested).gte("expense_date", startDate).lte("expense_date", today)),
-      fetchAll(admin.from("cash_accounts").select("id").eq("branch_id", requested).eq("active", true)),
+      fetchAll(admin.from("sales").select("id,created_at,grand_total,delivery_status").in("branch_id", branchIds).gte("created_at", startAt).lt("created_at", endAt)),
+      fetchAll(admin.from("seller_shifts").select("id,opened_at,status,variance,closed_at").in("branch_id", branchIds).gte("opened_at", startAt).lt("opened_at", endAt)),
+      fetchAll(admin.from("expenses").select("id,expense_date,amount,status").in("branch_id", branchIds).gte("expense_date", startDate).lte("expense_date", today)),
+      fetchAll(admin.from("cash_accounts").select("id").in("branch_id", branchIds).eq("active", true)),
     ]);
     const accountIds = accountRes.map((x: any) => x.id);
     const tx = accountIds.length ? await fetchAll(admin.from("cash_transactions").select("created_at,direction,amount,description").in("cash_account_id", accountIds).gte("created_at", startAt).lt("created_at", endAt)) : [];
