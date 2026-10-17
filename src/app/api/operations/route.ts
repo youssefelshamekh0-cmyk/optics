@@ -72,11 +72,12 @@ export async function GET(request: Request) {
     let accounts=admin.from("cash_accounts").select("id,branch_id,name,account_type,payment_method,opening_balance,active,branches(name)").order("name");
     let expenses=admin.from("expenses").select("id,branch_id,description,category,amount,expense_date,status,cash_account_id,branches(name),cash_accounts(name)").order("expense_date",{ascending:false}).limit(100);
     if(branchId){accounts=accounts.eq("branch_id",branchId);expenses=expenses.eq("branch_id",branchId)} else if(!user!.roles.includes("super_admin")){accounts=accounts.in("branch_id",user!.branchIds);expenses=expenses.in("branch_id",user!.branchIds)}
-    const [a,e,t,b,requests]=await Promise.all([accounts,expenses,admin.from("cash_transactions").select("id,cash_account_id,direction,amount,transaction_type,description,created_at").order("created_at",{ascending:false}).limit(1000),admin.from("branches").select("id,name,code,status").order("name"),admin.from("payroll_advance_requests").select("id,user_id,branch_id,amount,notes,status,created_at,user_profiles(full_name,phone),branches(name)").eq("status","pending").order("created_at")]);
-    if(a.error||e.error||t.error||b.error||requests.error)throw a.error??e.error??t.error??b.error??requests.error;
+    const [a,e,t,b,requests,reconciliations]=await Promise.all([accounts,expenses,admin.from("cash_transactions").select("id,cash_account_id,direction,amount,transaction_type,description,created_at,created_by").order("created_at",{ascending:false}).limit(1000),admin.from("branches").select("id,name,code,status").order("name"),admin.from("payroll_advance_requests").select("id,user_id,branch_id,amount,notes,status,created_at,user_profiles(full_name,phone),branches(name)").eq("status","pending").order("created_at"),admin.from("cash_reconciliations").select("id,cash_account_id,expected_balance,counted_balance,difference,notes,created_by,created_at,cash_accounts(name,branch_id,branches(name))").order("created_at",{ascending:false}).limit(100)]);
+    if(a.error||e.error||t.error||b.error||requests.error||reconciliations.error)throw a.error??e.error??t.error??b.error??requests.error??reconciliations.error;
     const ids:string[]=(a.data??[]).map((x:any)=>x.id); const movements:any[]=(t.data??[]).filter((x:any)=>ids.includes(x.cash_account_id));
-    const balances=(a.data??[]).map((account:any)=>({ ...account,balance:Number(account.opening_balance)+movements.filter((x:any)=>x.cash_account_id===account.id).reduce((sum:number,x:any)=>sum+(x.description==="رصيد افتتاحي"?0:(x.direction==="in"?1:-1)*Number(x.amount)),0) }));
-    return Response.json({accounts:balances,transactions:movements,expenses:e.data??[],requests:requests.data??[],branches:b.data??[]});
+    const balances=await Promise.all((a.data??[]).map(async(account:any)=>{const result=await admin.rpc("cash_account_balance",{p_account:account.id});if(result.error)throw result.error;return {...account,balance:Number(result.data??0)};}));
+    const filteredReconciliations=(reconciliations.data??[]).filter((row:any)=>ids.includes(row.cash_account_id));
+    return Response.json({accounts:balances,transactions:movements,expenses:e.data??[],requests:requests.data??[],branches:b.data??[],reconciliations:filteredReconciliations});
   }
   if(module==="staff") {
     let employees=admin.from("employees").select("id,user_id,branch_id,full_name,phone,job_title,base_salary,commission_rate,status,branches(name)").order("full_name");
@@ -113,6 +114,7 @@ const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("payrollPay"),payrollId:uuid,cashAccountId:uuid,amount:z.number().positive(),operationId:uuid}),
  z.object({action:z.literal("purchase"),invoiceNumber:z.string().trim().min(1).max(100),supplierName:z.string().trim().min(2).max(160),supplierPhone:z.string().max(40).default(""),branchId:uuid,items:z.array(z.object({productId:uuid,quantity:z.number().int().min(1),unitCost:z.number().min(0)})).min(1).max(100),paidAmount:z.number().min(0),cashAccountId:uuid.nullable().optional()}),
  z.object({action:z.literal("centralDeposit"),cashAccountId:uuid.nullable().optional()}),
+ z.object({action:z.literal("cashReconcile"),cashAccountId:uuid,operationId:uuid,countedBalance:z.number().min(0).max(1000000000),notes:z.string().trim().max(500).default("")}),
 ]);
 
 export async function POST(request:Request){
@@ -121,7 +123,15 @@ export async function POST(request:Request){
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId=""; let actionResult:any=null;
- if(action==="centralDeposit"){
+ if(action==="cashReconcile"){
+   if(!user!.roles.includes("super_admin"))return Response.json({error:"مطابقة الخزائن متاحة لمالك البراند فقط"},{status:403});
+   const {data,error}=await admin.rpc("record_cash_reconciliation",{p_operation_id:parsed.data.operationId,p_cash_account_id:parsed.data.cashAccountId,p_counted_balance:parsed.data.countedBalance,p_actor:user!.id,p_notes:parsed.data.notes});
+   if(error?.message.includes("operation id conflict"))return Response.json({error:"معرّف المطابقة مستخدم لبيانات مختلفة"},{status:409});
+   if(error?.message.includes("not found or inactive"))return Response.json({error:"الخزنة غير موجودة أو غير نشطة"},{status:409});
+   if(error)throw error;
+   actionResult=Array.isArray(data)?data[0]:data;
+   entityId=actionResult?.id??parsed.data.operationId;
+  }else if(action==="centralDeposit"){
    if(!user!.roles.includes("super_admin"))return Response.json({error:"توريد الحسابات غير النقدية للخزنة المركزية متاح للمالك فقط"},{status:403});
    const {data,error}=await admin.rpc("deposit_non_cash_accounts_to_central",{p_account:parsed.data.cashAccountId??null,p_actor:user!.id});
    if(error){
@@ -187,6 +197,6 @@ export async function POST(request:Request){
  }else if(action==="purchase"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"?{result:actionResult}:{});
- return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{})});
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"?{result:actionResult}:{});
+ return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{})});
 }
