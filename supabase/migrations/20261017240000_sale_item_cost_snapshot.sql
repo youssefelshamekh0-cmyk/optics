@@ -13,12 +13,15 @@ where si.sale_id=s.id and bp.branch_id=s.branch_id and bp.product_id=si.product_
 
 -- Legacy prescription-lens costs reconstructed from current price rows are estimates.
 update public.sale_items si
-set unit_cost = coalesce(r.cost_price,0) + coalesce(l.cost_price,0),
+set unit_cost =
+      coalesce((select r.cost_price from public.sales s join public.branch_lens_prices r
+        on r.branch_id=s.branch_id and r.id=nullif(si.technical_details->'right'->>'priceId','')::uuid
+        where s.id=si.sale_id),0)
+      + coalesce((select l.cost_price from public.sales s join public.branch_lens_prices l
+        on l.branch_id=s.branch_id and l.id=nullif(si.technical_details->'left'->>'priceId','')::uuid
+        where s.id=si.sale_id),0),
     unit_cost_is_estimated = true
-from public.sales s
-left join public.branch_lens_prices r on r.id=nullif(si.technical_details->'right'->>'priceId','')::uuid and r.branch_id=s.branch_id
-left join public.branch_lens_prices l on l.id=nullif(si.technical_details->'left'->>'priceId','')::uuid and l.branch_id=s.branch_id
-where si.sale_id=s.id and si.product_id is null and si.item_kind='prescription_lens';
+where si.product_id is null and si.item_kind='prescription_lens';
 
 create or replace function public.capture_sale_item_unit_cost()
 returns trigger
