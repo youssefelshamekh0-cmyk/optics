@@ -25,12 +25,11 @@ begin
   if v_status='cancelled' then raise exception 'cancelled sale'; end if;
   if v_status='delivered' then raise exception 'already delivered'; end if;
 
-  if p_discount_amount < 0 or p_discount_amount > v_subtotal then raise exception 'invalid discount amount'; end if;
-  update public.sales set discount_amount=p_discount_amount,updated_at=now() where id=p_sale_id;
-  v_total:=v_subtotal-p_discount_amount;
-
   select coalesce(sum(amount),0) into v_paid
     from public.sale_payments where sale_id=p_sale_id;
+  if p_discount_amount < 0 or p_discount_amount > v_subtotal-v_paid then raise exception 'invalid discount amount'; end if;
+  update public.sales set discount_amount=p_discount_amount,updated_at=now() where id=p_sale_id;
+  v_total:=v_subtotal-p_discount_amount;
   v_due:=round(v_total-v_paid,2);
   if v_due < 0 then raise exception 'invoice balance is negative'; end if;
 
