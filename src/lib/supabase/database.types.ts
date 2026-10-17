@@ -111,6 +111,7 @@ export type Database = {
           id: string
           product_id: string
           quantity: number
+          low_stock_threshold: number
           reference_price: number
           updated_at: string
         }
@@ -120,6 +121,7 @@ export type Database = {
           id?: string
           product_id: string
           quantity?: number
+          low_stock_threshold?: number
           reference_price?: number
           updated_at?: string
         }
@@ -129,6 +131,7 @@ export type Database = {
           id?: string
           product_id?: string
           quantity?: number
+          low_stock_threshold?: number
           reference_price?: number
           updated_at?: string
         }
@@ -942,6 +945,44 @@ export type Database = {
           p_payment_method: string
           p_received_by: string
           p_sale_id: string
+        }
+        Returns: string
+      },
+      create_customer_idempotent: {
+        Args: {
+          p_operation_id: string
+          p_actor: string
+          p_full_name: string
+          p_phone: string
+          p_email: string
+          p_notes: string
+        }
+        Returns: Json
+      },
+      create_optics_sale_idempotent: {
+        Args: {
+          p_operation_id: string
+          p_actor_id: string
+          p_branch_id: string
+          p_customer_id: string
+          p_sale_type: string
+          p_items: Json
+          p_prescription: Json
+          p_final_total: number
+          p_initial_payment: number
+          p_payment_method: string
+          p_notes: string
+        }
+        Returns: Json
+      },
+      record_sale_payment_idempotent: {
+        Args: {
+          p_sale_id: string
+          p_amount: number
+          p_payment_method: string
+          p_received_by: string
+          p_notes: string
+          p_operation_id: string
         }
         Returns: string
       }
