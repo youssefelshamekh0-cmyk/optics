@@ -37,6 +37,17 @@ export function setOfflineActor(actorId: string) {
   notify();
 }
 
+async function refreshOfflineActor(): Promise<string | null> {
+  if (typeof navigator === "undefined" || !navigator.onLine) return storedActorId();
+  try {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    if (!response.ok) return storedActorId();
+    const data = await response.json();
+    if (typeof data.user?.id === "string") setOfflineActor(data.user.id);
+  } catch { /* Use the previous actor only while continuing an authenticated offline session. */ }
+  return storedActorId();
+}
+
 function database(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("التخزين المحلي غير متاح على هذا الجهاز"));
   if (opening) return opening;
@@ -124,6 +135,7 @@ export async function offlineSummary(): Promise<OfflineSummary> {
 export async function cachedRequestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const parsedUrl = new URL(url, window.location.origin);
+  if ((method === "GET" && canCache(parsedUrl)) || (method === "POST" && parsedUrl.pathname === "/api/sales")) await refreshOfflineActor();
   const cacheable = method === "GET" && canCache(parsedUrl);
 
   if (method === "POST" && parsedUrl.pathname === "/api/sales") {
