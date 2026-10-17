@@ -18,6 +18,7 @@ from public.branch_products bp
 where bp.branch_id=t.source_branch_id and bp.product_id=t.product_id
   and (t.operation_id is null or t.source_cost_price=0 or t.source_reference_price=0);
 update public.inventory_transfers set operation_id=gen_random_uuid() where operation_id is null;
+update public.inventory_transfers set request_fingerprint='legacy:'||id::text where request_fingerprint is null;
 alter table public.inventory_transfers alter column operation_id set not null;
 alter table public.inventory_transfers drop constraint if exists inventory_transfers_status_check;
 alter table public.inventory_transfers add constraint inventory_transfers_status_check
@@ -104,9 +105,13 @@ begin
   insert into public.branch_products(branch_id,product_id,cost_price,reference_price,quantity)
   values(v_transfer.destination_branch_id,v_transfer.product_id,v_transfer.source_cost_price,v_transfer.source_reference_price,v_transfer.quantity)
   on conflict(branch_id,product_id) do update
-    set quantity=public.branch_products.quantity+excluded.quantity,
-        cost_price=excluded.cost_price,
-        reference_price=excluded.reference_price,
+    set cost_price=case
+          when public.branch_products.quantity+excluded.quantity>0 then
+            round((public.branch_products.quantity*public.branch_products.cost_price+excluded.quantity*excluded.cost_price)
+              /(public.branch_products.quantity+excluded.quantity),2)
+          else excluded.cost_price end,
+        reference_price=case when public.branch_products.reference_price>0 then public.branch_products.reference_price else excluded.reference_price end,
+        quantity=public.branch_products.quantity+excluded.quantity,
         updated_at=now();
 
   update public.inventory_transfers set status='received',received_at=now(),received_by=p_actor where id=p_transfer;
