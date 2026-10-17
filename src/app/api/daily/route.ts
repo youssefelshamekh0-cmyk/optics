@@ -43,6 +43,43 @@ export async function GET(request: Request) {
   const requested = params.get("branchId");
   if (requested && requested !== "all" && !allowed.includes(requested)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
   const branchIds: string[] = requested && requested !== "all" ? [requested] : allowed;
+  if (params.get("mode") === "days") {
+    if (!isOwner) return Response.json({ error: "هذه الشاشة متاحة لمالك البراند" }, { status: 403 });
+    if (!requested || requested === "all") return Response.json({ error: "اختر فرعًا لعرض يومياته" }, { status: 400 });
+    const startDate = addDays(today, -29);
+    const startAt = cairoMidnight(startDate).toISOString();
+    const endAt = cairoMidnight(addDays(today, 1)).toISOString();
+    const [salesRes, shiftsRes, expenseRes, accountRes] = await Promise.all([
+      fetchAll(admin.from("sales").select("id,created_at,grand_total,delivery_status").eq("branch_id", requested).gte("created_at", startAt).lt("created_at", endAt)),
+      fetchAll(admin.from("seller_shifts").select("id,opened_at,status,variance,closed_at").eq("branch_id", requested).gte("opened_at", startAt).lt("opened_at", endAt)),
+      fetchAll(admin.from("expenses").select("id,expense_date,amount,status").eq("branch_id", requested).gte("expense_date", startDate).lte("expense_date", today)),
+      fetchAll(admin.from("cash_accounts").select("id").eq("branch_id", requested).eq("active", true)),
+    ]);
+    const accountIds = accountRes.map((x: any) => x.id);
+    const tx = accountIds.length ? await fetchAll(admin.from("cash_transactions").select("created_at,direction,amount,description").in("cash_account_id", accountIds).gte("created_at", startAt).lt("created_at", endAt)) : [];
+    const dateOf = (value: string) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+    const grouped = new Map<string, any>();
+    for (let i = 0; i < 30; i++) {
+      const d = addDays(today, -i);
+      grouped.set(d, { date: d, invoices: 0, sales: 0, income: 0, expenses: 0, variance: null as number | null, shifts: 0, status: "balanced" });
+    }
+    for (const x of salesRes) { const d = dateOf(x.created_at); const row = grouped.get(d); if (row && x.delivery_status !== "cancelled") { row.invoices++; row.sales += Number(x.grand_total); } }
+    for (const x of tx) { if (x.description === "رصيد افتتاحي") continue; const row = grouped.get(dateOf(x.created_at)); if (row && x.direction === "in") row.income += Number(x.amount); }
+    for (const x of expenseRes) { const row = grouped.get(x.expense_date); if (row && x.status === "paid") row.expenses += Number(x.amount); }
+    for (const x of shiftsRes) {
+      const row = grouped.get(dateOf(x.opened_at)); if (!row) continue;
+      row.shifts++;
+      if (x.variance != null && x.status === "closed") row.variance = (row.variance ?? 0) + Number(x.variance);
+    }
+    for (const row of grouped.values()) {
+      row.sales = Math.round(row.sales * 100) / 100;
+      row.income = Math.round(row.income * 100) / 100;
+      row.expenses = Math.round(row.expenses * 100) / 100;
+      row.variance = row.variance == null ? null : Math.round(row.variance * 100) / 100;
+      row.status = row.variance == null ? (row.shifts ? "open" : "unknown") : row.variance < -0.009 ? "deficit" : row.variance > 0.009 ? "surplus" : "balanced";
+    }
+    return Response.json({ role: "owner", today, branches: branches ?? [], branchId: requested, days: [...grouped.values()] });
+  }
   if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], weekHours: [], weekStart: weekStartDate });
 
   // Invoices of the day (sellers only see their own).
