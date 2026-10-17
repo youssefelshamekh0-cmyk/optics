@@ -42,9 +42,9 @@ begin
       raise exception 'invalid sale item';
     end;
 
-    if length(v_name) not between 2 and 160
-       or v_qty not between 1 and 100
-       or v_price < 0
+    if v_name is null or length(v_name) not between 2 and 160
+       or v_qty is null or v_qty not between 1 and 100
+       or v_price is null or v_price < 0
        or v_kind not in ('product', 'prescription_lens', 'service') then
       raise exception 'invalid sale item';
     end if;
