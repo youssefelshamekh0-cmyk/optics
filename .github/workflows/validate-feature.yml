@@ -8,7 +8,7 @@ on:
       - fix/delivery-modal-daily-branch-ui
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: validate-${{ github.ref }}
@@ -41,6 +41,8 @@ jobs:
       - name: Production build
         run: npm run build
   patch-compatible-dependencies:
+    permissions:
+      contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/fix/delivery-modal-daily-branch-ui'
     needs: typecheck-and-build
     runs-on: ubuntu-latest
