@@ -142,8 +142,12 @@ export async function GET(request: Request) {
     const sale = returnSaleMap.get(ret.sale_id) as any;
     if (sale) {
       const actor = sale.created_by ?? "unassigned";
-      const row = performance.get(actor);
-      if (row) row.returned += Number(ret.refund_amount);
+      const row = performance.get(actor) ?? {
+        userId: actor, userName: profiles.get(actor) ?? "غير منسوب لمستخدم",
+        invoiceCount: 0, invoiced: 0, collected: 0, returned: 0,
+      };
+      row.returned += Number(ret.refund_amount);
+      performance.set(actor, row);
     }
   }
 
