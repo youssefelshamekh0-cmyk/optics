@@ -20,6 +20,8 @@ const shiftDate = (date: string, n: number) => new Date(Date.parse(`${date}T00:0
 
 export default function DailyOverview() {
   const [data, setData] = useState<Daily | null>(null);
+  const [view, setView] = useState<"list" | "detail">("list");
+  const [days, setDays] = useState<DayRow[]>([]);
   const [branchId, setBranchId] = useState("all");
   const [date, setDate] = useState("");
   const [error, setError] = useState("");
@@ -38,10 +40,30 @@ export default function DailyOverview() {
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل اليومية"); } finally { setLoading(false); }
   }, [branchId, date]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (data?.role === "owner" && branchId === "all" && data.branches.length) setBranchId(data.branches[0].id); }, [data, branchId]);
+  useEffect(() => { if (view !== "list" || branchId === "all") return; let active = true; (async () => { try { const qs = new URLSearchParams({ mode: "days", branchId }); const r = await fetch(`/api/daily?${qs}`, { cache: "no-store" }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? "تعذر تحميل قائمة اليوميات"); if (active) { setDays(j.days ?? []); setError(""); } } catch (e) { if (active) setError(e instanceof Error ? e.message : "تعذر تحميل قائمة اليوميات"); } })(); return () => { active = false; }; }, [view, branchId, data?.today]);
   useEffect(() => { const reload = () => void load(true); window.addEventListener("shift-changed", reload); const id = setInterval(() => { setNow(Date.now()); if (!date || date === data?.today) reload(); }, 60000); return () => { window.removeEventListener("shift-changed", reload); clearInterval(id); }; }, [load, date, data?.today]);
 
+  const dayStatus: Record<DayRow["status"], { label: string; className: string }> = {
+    deficit: { label: "عجز", className: "bad" }, surplus: { label: "زيادة", className: "good" },
+    balanced: { label: "مظبوط", className: "good" }, open: { label: "وردية مفتوحة", className: "" },
+    unknown: { label: "غير محسوم", className: "" },
+  };
   if (error && !data) return <section className="panel"><p className="notice error">{error}</p></section>;
   if (!data) return <section className="panel"><p className="footnote">جارٍ تحميل اليومية…</p></section>;
+  if (view === "list") return <section className="panel daily-panel">
+    <div className="section-heading"><div><p className="eyebrow">اليوميات</p><h2>يوميات الفرع</h2></div>
+      <div className="daily-controls"><label>الفرع<select value={branchId} onChange={e => setBranchId(e.target.value)}>{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+      <button type="button" className="row-action" onClick={() => { setDate(data.today); setView("detail"); }}>عرض اليومية الحالية</button></div></div>
+    <p className="footnote">آخر 30 يومًا لهذا الفرع فقط. اضغط «عرض» لفتح تفاصيل اليوم وفواتيره ومصروفاته.</p>
+    {error && <p className="notice error" role="alert">{error}</p>}
+    <div className="daily-list">{days.map(day => <article className="daily-list-row" key={day.date}>
+      <div className="daily-list-date"><strong>{new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "short", year: "numeric" }).format(new Date(day.date + "T12:00:00Z"))}</strong><span className={`status ${dayStatus[day.status].className}`}>{dayStatus[day.status].label}</span></div>
+      <div className="daily-list-stats"><span>الدخل <strong>{money(day.income)}</strong></span><span>المصروفات <strong>{money(day.expenses)}</strong></span><span>الفواتير <strong>{day.invoices}</strong></span><span>فرق الوردية <strong>{day.variance == null ? "—" : money(day.variance)}</strong></span></div>
+      <button type="button" className="row-action" onClick={() => { setDate(day.date); setView("detail"); }}>عرض</button>
+    </article>)}{days.length === 0 && <p className="table-empty">لا توجد يوميات لهذا الفرع في الفترة المحددة.</p>}</div>
+  </section>;
+
 
   const owner = data.role === "owner";
   const isToday = data.date === data.today;
@@ -52,7 +74,7 @@ export default function DailyOverview() {
     <section className="panel daily-panel">
       <div className="section-heading"><div><p className="eyebrow">{isToday ? "اليومية · اليوم" : "اليومية"}</p><h2>{dayLabel}</h2></div>
         <div className="daily-controls">
-          <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="all">{owner ? "كل الفروع" : "كل فروعي"}</option>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          <button type="button" className="row-action" onClick={() => setView("list")}>الرجوع لقائمة اليوميات</button><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <div className="daily-date"><button type="button" className="row-action" aria-label="اليوم السابق" onClick={() => setDate(shiftDate(data.date, -1))}>›</button>
             <input type="date" aria-label="اختر يومًا" value={data.date} max={data.today} onChange={(e) => e.target.value && setDate(e.target.value)} />
             <button type="button" className="row-action" aria-label="اليوم التالي" disabled={isToday} onClick={() => setDate(shiftDate(data.date, 1) >= data.today ? "" : shiftDate(data.date, 1))}>‹</button>
