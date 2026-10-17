@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   const admin = getSupabaseAdmin();
   const operationId = input.operationId ?? crypto.randomUUID();
   const { data: customerData, error } = await admin.rpc("create_customer_idempotent", {
-    p_operation_id: operationId, p_actor_id: user!.id, p_full_name: input.name,
+    p_operation_id: operationId, p_actor_id: user!.id!, p_full_name: input.name,
     p_phone: phone, p_email: input.email || null, p_notes: input.notes || null,
   });
   if (error?.message.includes("customer phone already exists")) return Response.json({ error: "رقم الموبايل مسجل لعميل بالفعل" }, { status: 409 });
