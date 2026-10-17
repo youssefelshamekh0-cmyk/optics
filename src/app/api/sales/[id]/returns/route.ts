@@ -30,7 +30,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) {
     return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   }
-  const { data, error } = await admin.from("cash_accounts")
+  const { data, error } = await (admin as any).from("cash_accounts")
     .select("id,name,payment_method").eq("branch_id", sale.branch_id).eq("active", true).order("name");
   if (error) throw error;
   return Response.json({ accounts: data ?? [] });
