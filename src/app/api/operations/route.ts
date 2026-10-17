@@ -186,6 +186,7 @@ export async function POST(request:Request){
     if(error)throw error;
     actionResult=Array.isArray(data)?data[0]:data;entityId=parsed.data.transferId;
   }else if(action==="cashAccount"){
+   if(!user!.roles.includes("super_admin"))return Response.json({error:"إدارة حسابات الخزائن متاحة لمالك البراند فقط"},{status:403});
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("create_cash_account",{p_branch:parsed.data.branchId,p_name:parsed.data.name,p_type:parsed.data.accountType,p_method:parsed.data.paymentMethod,p_opening:parsed.data.openingBalance,p_actor:user!.id}); if(error)throw error; entityId=data;
  }else if(action==="expense"){
    if(parsed.data.fromCentral&&!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
