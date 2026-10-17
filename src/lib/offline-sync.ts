@@ -130,6 +130,30 @@ function notify() {
 
 export async function offlineOperations(): Promise<OfflineQueueOperation[]> { return getActorOutbox(); }
 
+async function localCustomerRows(query: string): Promise<Array<{ id: string; full_name: string; phone: string; email: string }>> {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (normalized.length < 2) return [];
+  const operations = await getActorOutbox();
+  return operations.filter(item => item.type === "customer.create" && item.status !== "synced" && item.localCustomerId)
+    .map(item => ({
+      id: item.localCustomerId!,
+      full_name: String(item.payload.name ?? ""),
+      phone: String(item.payload.phone ?? ""),
+      email: String(item.payload.email ?? ""),
+    }))
+    .filter(customer => customer.full_name.toLocaleLowerCase().includes(normalized) || customer.phone.toLocaleLowerCase().includes(normalized))
+    .slice(0,20);
+}
+
+async function addLocalCustomerMatches<T>(data: T, query: string): Promise<T> {
+  if (typeof data !== "object" || data === null || !("customers" in data) || !Array.isArray((data as { customers?: unknown }).customers)) return data;
+  const current = (data as { customers: Array<{ id?: string }> }).customers;
+  const local = await localCustomerRows(query);
+  const map = new Map<string, any>();
+  for (const row of [...current, ...local]) if (typeof row.id === "string") map.set(row.id, row);
+  return { ...(data as any), customers: [...map.values()].slice(0,20) } as T;
+}
+
 export async function offlineSummary(): Promise<OfflineSummary> {
   const operations = await getActorOutbox();
   return {
@@ -180,12 +204,20 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(data.error ?? "تعذر إتمام الطلب"), { status: response.status });
     if (cacheable) await cacheJson(parsedUrl.pathname + parsedUrl.search, data);
-    return data as T;
+    return parsedUrl.pathname === "/api/sales/customers"
+      ? await addLocalCustomerMatches(data as T, parsedUrl.searchParams.get("q") ?? "")
+      : data as T;
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : 0;
     if (status || !cacheable) throw error;
     const cached = await getCachedJson<T>(parsedUrl.pathname + parsedUrl.search);
-    if (cached !== null) return cached;
+    if (cached !== null) return parsedUrl.pathname === "/api/sales/customers"
+      ? await addLocalCustomerMatches(cached, parsedUrl.searchParams.get("q") ?? "")
+      : cached;
+    if (parsedUrl.pathname === "/api/sales/customers") {
+      const customers = await localCustomerRows(parsedUrl.searchParams.get("q") ?? "");
+      if (customers.length) return { customers } as T;
+    }
     throw new Error("لا يوجد اتصال ولا توجد نسخة محلية محفوظة لهذه البيانات. اتصل بالإنترنت مرة واحدة لتحميل بيانات الفرع.");
   }
 }
