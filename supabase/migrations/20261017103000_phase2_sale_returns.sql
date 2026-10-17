@@ -7,10 +7,13 @@ create table if not exists public.sale_returns (
   refund_amount numeric(12,2) not null check (refund_amount > 0),
   cash_account_id uuid not null references public.cash_accounts(id) on delete restrict,
   reason varchar(500) not null,
+  idempotency_key uuid,
+  request_items jsonb,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
 create index if not exists sale_returns_sale_idx on public.sale_returns(sale_id, created_at desc);
+create unique index if not exists sale_returns_idempotency_idx on public.sale_returns(sale_id, idempotency_key) where idempotency_key is not null;
 
 create table if not exists public.sale_return_items (
   id uuid primary key default gen_random_uuid(),
@@ -31,7 +34,8 @@ create or replace function public.process_sale_return(
   p_items jsonb,
   p_cash_account_id uuid,
   p_reason text,
-  p_actor uuid
+  p_actor uuid,
+  p_idempotency_key uuid
 ) returns table(return_id uuid, refund_amount numeric)
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -47,6 +51,7 @@ declare
   v_paid numeric(12,2);
   v_refunded numeric(12,2);
   v_return_id uuid;
+  v_existing_return record;
 begin
   if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0
      or nullif(trim(p_reason), '') is null then
@@ -64,6 +69,22 @@ begin
   for update;
   if not found then raise exception 'sale not found'; end if;
   if v_sale.delivery_status = 'cancelled' then raise exception 'cancelled sale cannot be returned'; end if;
+
+  if p_idempotency_key is not null then
+    select sr.id, sr.refund_amount, sr.cash_account_id, sr.reason, sr.request_items
+    into v_existing_return
+    from public.sale_returns sr
+    where sr.sale_id = p_sale_id and sr.idempotency_key = p_idempotency_key;
+    if found then
+      if v_existing_return.cash_account_id <> p_cash_account_id
+         or v_existing_return.reason <> trim(p_reason)
+         or v_existing_return.request_items <> p_items then
+        raise exception 'idempotency key reused with different return request';
+      end if;
+      return query select v_existing_return.id, v_existing_return.refund_amount;
+      return;
+    end if;
+  end if;
 
   if not exists (
     select 1 from public.cash_accounts ca
@@ -115,8 +136,8 @@ begin
     raise exception 'refund exceeds net paid amount';
   end if;
 
-  insert into public.sale_returns(sale_id, branch_id, refund_amount, cash_account_id, reason, created_by)
-  values(p_sale_id, v_sale.branch_id, v_total_refund, p_cash_account_id, trim(p_reason), p_actor)
+  insert into public.sale_returns(sale_id, branch_id, refund_amount, cash_account_id, reason, idempotency_key, request_items, created_by)
+  values(p_sale_id, v_sale.branch_id, v_total_refund, p_cash_account_id, trim(p_reason), p_idempotency_key, p_items, p_actor)
   returning id into v_return_id;
 
   for v_item in
@@ -161,5 +182,5 @@ begin
 end;
 $$;
 
-revoke all on function public.process_sale_return(uuid,jsonb,uuid,text,uuid) from public, anon, authenticated;
-grant execute on function public.process_sale_return(uuid,jsonb,uuid,text,uuid) to service_role;
+revoke all on function public.process_sale_return(uuid,jsonb,uuid,text,uuid,uuid) from public, anon, authenticated;
+grant execute on function public.process_sale_return(uuid,jsonb,uuid,text,uuid,uuid) to service_role;
