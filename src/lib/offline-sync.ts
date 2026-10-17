@@ -282,6 +282,24 @@ export async function reviseOfflineSale(id: string, edits: { finalTotal: number;
   notify();
 }
 
+export async function reviseOfflineCustomer(id: string, edits: { name: string; phone: string; email?: string; notes?: string }): Promise<void> {
+  const operation = (await getActorOutbox()).find(item => item.id === id);
+  if (!operation || operation.type !== "customer.create" || (operation.status !== "conflict" && operation.status !== "rejected")) {
+    throw new Error("لا يمكن تعديل بيانات هذا العميل في حالته الحالية");
+  }
+  const name = edits.name.trim();
+  const phone = edits.phone.trim();
+  if (name.length < 2 || name.length > 160 || phone.length > 40) throw new Error("راجع اسم العميل ورقم الهاتف");
+  await putOperation({
+    ...operation,
+    payload: { ...operation.payload, name, phone, email: edits.email ?? "", notes: edits.notes ?? "" },
+    status: "conflict",
+    message: "تم تعديل بيانات العميل محليًا. احفظ التعديل ثم أعد المحاولة.",
+    updatedAt: Date.now(),
+  });
+  notify();
+}
+
 export async function retryOfflineOperation(id: string): Promise<void> {
   const operation = (await getActorOutbox()).find(item => item.id === id);
   if (!operation || (operation.status !== "conflict" && operation.status !== "rejected")) return;
