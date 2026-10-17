@@ -35,7 +35,7 @@ export default function CentralCash() {
     [accounts, selectedAccountId]
   );
   const previewTotal = selectedAccounts.reduce((sum, account) => sum + Math.max(0, Number(account.balance) || 0), 0);
-  const previewLines = selectedAccounts.map(a => `• ${a.name} — ${money(Math.max(0, Number(a.balance) || 0))}`).join("\n");
+  const previewLines = selectedAccounts.map(a => `• ${a.name} — الرصيد: ${money(Number(a.balance) || 0)}`).join("\n");
 
   async function deposit() {
     if (!central || depositBusy) return;
