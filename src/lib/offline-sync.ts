@@ -250,7 +250,7 @@ export async function syncPendingOperations(): Promise<void> {
   if (syncing || typeof navigator === "undefined" || !navigator.onLine || !storedActorId()) return;
   syncing = true;
   try {
-    const operations = (await getActorOutbox()).filter(operation => operation.status === "pending");
+    const operations = (await getActorOutbox()).filter(operation => operation.status === "pending").sort((a, b) => a.type === b.type ? a.createdAt - b.createdAt : a.type === "customer.create" ? -1 : 1);
     for (const queued of operations) {
       const operation = (await getActorOutbox()).find(item => item.id === queued.id);
       if (!operation || operation.status !== "pending") continue;
@@ -266,23 +266,11 @@ export async function syncPendingOperations(): Promise<void> {
       notify();
       let response: Response;
       let data: Record<string, unknown>;
-      let payloadToSend = { ...operation.payload };
-      if (operation.type === "sale.create" && typeof payloadToSend.customerId === "string") {
-        const mapped = await getCachedJson<{ serverId: string }>("customer-map:" + payloadToSend.customerId);
-        if (mapped?.serverId) payloadToSend.customerId = mapped.serverId;
-        else {
-          const localCustomerOperation = allOperations.find(item => item.type === "customer.create" && item.localCustomerId === payloadToSend.customerId);
-          if (localCustomerOperation) {
-            await putOperation({ ...operation, status: "pending", updatedAt: Date.now(), message: "بانتظار مزامنة بيانات العميل أولاً" });
-            continue;
-          }
-        }
-      }
       try {
         response = await fetch(operation.url, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(payloadToSend),
+          body: JSON.stringify(operation.payload),
           cache: "no-store",
         });
         data = await response.json().catch(() => ({}));
