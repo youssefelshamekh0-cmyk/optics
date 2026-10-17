@@ -13,11 +13,6 @@ alter table public.financial_operation_keys enable row level security;
 revoke all on public.financial_operation_keys from public,anon,authenticated;
 grant all on public.financial_operation_keys to service_role;
 
--- A paid expense must never have two ledger outflows, even if a legacy caller retries.
-create unique index if not exists cash_transactions_expense_reference_once
-  on public.cash_transactions(reference_id)
-  where transaction_type='expense' and reference_id is not null;
-
 -- Separate advance payouts from payroll payments so each request can be paid at most once.
 alter table public.cash_transactions drop constraint if exists cash_transactions_transaction_type_check;
 alter table public.cash_transactions add constraint cash_transactions_transaction_type_check
