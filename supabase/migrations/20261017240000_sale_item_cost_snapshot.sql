@@ -34,3 +34,6 @@ drop trigger if exists sale_items_capture_unit_cost on public.sale_items;
 create trigger sale_items_capture_unit_cost
 before insert on public.sale_items
 for each row execute function public.capture_sale_item_unit_cost();
+
+revoke all on function public.capture_sale_item_unit_cost() from public,anon,authenticated;
+grant execute on function public.capture_sale_item_unit_cost() to service_role;
