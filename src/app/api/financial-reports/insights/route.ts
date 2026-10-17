@@ -2,6 +2,32 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/auth";
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidCalendarDate(value: string, pattern: RegExp) {
+  if (!pattern.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
+}
+function nextCalendarDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+function cairoMidnightUtc(value: string) {
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" });
+  const [year, month, day] = value.split("-").map(Number);
+  const target = Date.UTC(year, month - 1, day);
+  let low = target - 36 * 60 * 60 * 1000;
+  let high = target + 36 * 60 * 60 * 1000;
+  while (high - low > 1000) {
+    const mid = Math.floor((low + high) / 2);
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(mid)).map((part) => [part.type, part.value]));
+    const localDay = String(parts.year) + "-" + String(parts.month) + "-" + String(parts.day);
+    if (localDay >= value) high = mid;
+    else low = mid;
+  }
+  return new Date(high).toISOString();
+}
+
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 export async function GET(request: Request) {
@@ -13,12 +39,12 @@ export async function GET(request: Request) {
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
   const branchId = params.get("branchId") ?? "";
-  if (!datePattern.test(from) || !datePattern.test(to) || from > to) {
+  if (!isValidCalendarDate(from, datePattern) || !isValidCalendarDate(to, datePattern) || from > to) {
     return Response.json({ error: "حدد فترة صحيحة للتقرير" }, { status: 400 });
   }
 
-  const start = new Date(from + "T00:00:00.000Z").toISOString();
-  const end = new Date(new Date(to + "T00:00:00.000Z").getTime() + 86400000).toISOString();
+  const start = cairoMidnightUtc(from);
+  const end = cairoMidnightUtc(nextCalendarDate(to));
   const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
   const admin = getSupabaseAdmin() as any;
 
