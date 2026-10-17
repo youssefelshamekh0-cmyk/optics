@@ -58,3 +58,5 @@ These files are not applied to staging or production. Before staging execution, 
 
 ## Acceptance gate
 No merge/deploy until the migration baseline is reconciled, all migrations succeed on isolated staging, test results are recorded, security review is complete, and a successful build is verified.
+
+- Confirm the feature branch dependency audit reports zero vulnerabilities after the compatible Next.js/PostCSS security patch.
