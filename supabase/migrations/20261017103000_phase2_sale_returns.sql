@@ -22,7 +22,7 @@ create table if not exists public.sale_return_items (
   return_id uuid not null references public.sale_returns(id) on delete restrict,
   sale_item_id uuid not null references public.sale_items(id) on delete restrict,
   quantity integer not null check (quantity > 0),
-  unit_refund numeric(12,2) not null check (unit_refund >= 0),
+  unit_refund numeric(12,4) not null check (unit_refund >= 0),
   line_refund numeric(12,2) generated always as (quantity * unit_refund) stored
 );
 alter table public.sale_return_items alter column unit_refund type numeric(12,4) using unit_refund::numeric(12,4);
@@ -126,7 +126,7 @@ begin
     if v_already_returned + v_requested_qty > v_sale_item.quantity then
       raise exception 'return quantity exceeds sold quantity';
     end if;
-    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 2);
+    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 4);
     v_total_refund := v_total_refund + round(v_requested_qty * v_effective_unit, 2);
   end loop;
 
