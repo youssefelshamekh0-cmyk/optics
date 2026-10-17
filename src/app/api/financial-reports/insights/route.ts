@@ -38,6 +38,9 @@ export async function GET(request: Request) {
     .select("id,sale_id,product_id,item_name,quantity,unit_price,line_total,unit_cost,unit_cost_is_estimated,sales!inner(branch_id,created_at,delivery_status)")
     .gte("sales.created_at", ninetyDaysAgo).neq("sales.delivery_status", "cancelled").limit(30000);
   if (branchId) {
+    allSalesQuery.eq("branch_id", branchId);
+    periodSalesQuery.eq("branch_id", branchId);
+    returnQuery.eq("branch_id", branchId);
     stockQuery = stockQuery.eq("branch_id", branchId);
     recentItemsQuery = recentItemsQuery.eq("sales.branch_id", branchId);
   } else if (!user.roles.includes("super_admin")) {
@@ -119,8 +122,12 @@ export async function GET(request: Request) {
     if (!sale || new Date(payment.created_at) < new Date(start) || new Date(payment.created_at) >= new Date(end)) continue;
     if (branchId && sale.branch_id !== branchId) continue;
     const actor = sale.created_by ?? "unassigned";
-    const row = performance.get(actor);
-    if (row) row.collected += Number(payment.amount);
+    const row = performance.get(actor) ?? {
+      userId: actor, userName: profiles.get(actor) ?? "غير منسوب لمستخدم",
+      invoiceCount: 0, invoiced: 0, collected: 0, returned: 0,
+    };
+    row.collected += Number(payment.amount);
+    performance.set(actor, row);
   }
 
   const returnRows = returnsR.data ?? [];
