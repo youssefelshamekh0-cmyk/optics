@@ -64,9 +64,12 @@ export async function GET(request: Request) {
   if(module==="inventory") {
     let stock=admin.from("branch_products").select("branch_id,product_id,quantity,cost_price,reference_price,products(name,sku,category)").order("updated_at",{ascending:false}).limit(300);
     let moves=admin.from("stock_movements").select("id,branch_id,product_id,quantity_delta,movement_type,reason,created_at,products(name,sku),branches(name)").order("created_at",{ascending:false}).limit(100);
-    if(branchId){stock=stock.eq("branch_id",branchId);moves=moves.eq("branch_id",branchId)} else if(!user!.roles.includes("super_admin")){stock=stock.in("branch_id",user!.branchIds);moves=moves.in("branch_id",user!.branchIds)}
-    const [s,m,p,b]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name")]);
-    if(s.error||m.error||p.error||b.error)throw s.error??m.error??p.error??b.error; return Response.json({stock:s.data??[],movements:m.data??[],products:p.data??[],branches:b.data??[]});
+    let transfers=admin.from("inventory_transfers").select("id,operation_id,source_branch_id,destination_branch_id,product_id,quantity,reason,status,dispatched_at,received_at,products(name,sku)").eq("status","in_transit").order("dispatched_at",{ascending:false}).limit(200);
+    if(branchId){stock=stock.eq("branch_id",branchId);moves=moves.eq("branch_id",branchId);transfers=transfers.or("source_branch_id.eq."+branchId+",destination_branch_id.eq."+branchId)} else if(!user!.roles.includes("super_admin")){stock=stock.in("branch_id",user!.branchIds);moves=moves.in("branch_id",user!.branchIds);const allowed=user!.branchIds.join(",");transfers=transfers.or("source_branch_id.in.("+allowed+"),destination_branch_id.in.("+allowed+")")}
+    const [s,m,p,b,t]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name"),transfers]);
+    if(s.error||m.error||p.error||b.error||t.error)throw s.error??m.error??p.error??b.error??t.error;
+    const branchNames=new Map((b.data??[]).map((row:any)=>[row.id,row.name]));
+    return Response.json({stock:s.data??[],movements:m.data??[],products:p.data??[],branches:b.data??[],transfers:(t.data??[]).map((row:any)=>({...row,sourceBranchName:branchNames.get(row.source_branch_id)??"—",destinationBranchName:branchNames.get(row.destination_branch_id)??"—"}))});
   }
   if(module==="finance") {
     let accounts=admin.from("cash_accounts").select("id,branch_id,name,account_type,payment_method,opening_balance,active,branches(name)").order("name");
@@ -101,7 +104,8 @@ const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("delivery"),saleId:uuid,status:z.enum(["pending","processing","ready","delivered"]),notes:z.string().max(500).default("")}),
  z.object({action:z.literal("deliverAndCollect"),saleId:uuid,cashAccountId:uuid.optional().or(z.literal("")),discountAmount:z.number().min(0).max(100000000).default(0)}),
  z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
- z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().max(300).default("")}),
+ z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().trim().min(2).max(300),operationId:uuid}),
+ z.object({action:z.literal("transferReceive"),transferId:uuid}),
  z.object({action:z.literal("cashAccount"),branchId:uuid,name:z.string().trim().min(2).max(120),accountType:z.enum(["cash","bank","digital"]),paymentMethod:z.enum(["cash","card","instapay","other"]),openingBalance:z.number().min(0).max(100000000)}),
  z.object({action:z.literal("expense"),branchId:uuid,cashAccountId:uuid.nullable().optional(),fromCentral:z.boolean().optional().default(false),operationId:uuid,description:z.string().trim().min(2).max(300),category:z.string().trim().min(2).max(100),amount:z.number().positive().max(100000000),date:z.string().date()}),
  z.object({action:z.literal("timeOffRequest"),branchId:uuid,requestType:z.enum(["leave","permission"]),startsAt:z.string().datetime(),endsAt:z.string().datetime(),reason:z.string().trim().min(2).max(500)}),
@@ -119,7 +123,7 @@ const actionSchema=z.discriminatedUnion("action",[
 
 export async function POST(request:Request){
  const parsed=actionSchema.safeParse(await request.json().catch(()=>null)); if(!parsed.success)return Response.json({error:"راجع البيانات المدخلة"},{status:400});
- const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
+ const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"||action==="transferReceive"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId=""; let actionResult:any=null;
@@ -158,8 +162,22 @@ export async function POST(request:Request){
  }else if(action==="adjust"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {error}=await admin.rpc("adjust_stock",{p_branch_id:parsed.data.branchId,p_product_id:parsed.data.productId,p_delta:parsed.data.delta,p_reason:parsed.data.reason,p_actor:user!.id}); if(error)throw error;
  }else if(action==="transfer"){
-   if(!branchAllowed(user!,parsed.data.sourceBranchId)||!branchAllowed(user!,parsed.data.destinationBranchId))return Response.json({error:"ليس لديك وصول للفرعين"},{status:403}); const {data,error}=await admin.rpc("transfer_stock",{p_source:parsed.data.sourceBranchId,p_destination:parsed.data.destinationBranchId,p_product:parsed.data.productId,p_quantity:parsed.data.quantity,p_reason:parsed.data.reason,p_actor:user!.id}); if(error)throw error; entityId=data;
- }else if(action==="cashAccount"){
+    if(!branchAllowed(user!,parsed.data.sourceBranchId)||!branchAllowed(user!,parsed.data.destinationBranchId))return Response.json({error:"ليس لديك وصول للفرعين"},{status:403});
+    const {data,error}=await admin.rpc("transfer_stock",{p_source:parsed.data.sourceBranchId,p_destination:parsed.data.destinationBranchId,p_product:parsed.data.productId,p_quantity:parsed.data.quantity,p_reason:parsed.data.reason,p_actor:user!.id,p_operation_id:parsed.data.operationId});
+    if(error?.message.includes("insufficient product stock"))return Response.json({error:"الكمية غير متاحة في مخزون الفرع المرسل"},{status:409});
+    if(error?.message.includes("operation id conflict"))return Response.json({error:"معرّف التحويل مستخدم لبيانات مختلفة"},{status:409});
+    if(error)throw error;
+    actionResult=Array.isArray(data)?data[0]:data;entityId=actionResult?.transferId??parsed.data.operationId;
+  }else if(action==="transferReceive"){
+    const transfer=await admin.from("inventory_transfers").select("id,destination_branch_id,status").eq("id",parsed.data.transferId).maybeSingle();
+    if(transfer.error)throw transfer.error;
+    if(!transfer.data)return Response.json({error:"التحويل غير موجود"},{status:404});
+    if(!branchAllowed(user!,transfer.data.destination_branch_id))return Response.json({error:"استلام التحويل متاح للفرع المستلم فقط"},{status:403});
+    const {data,error}=await admin.rpc("receive_inventory_transfer",{p_transfer:parsed.data.transferId,p_actor:user!.id});
+    if(error?.message.includes("not awaiting receipt"))return Response.json({error:"التحويل غير موجود في قائمة انتظار الاستلام"},{status:409});
+    if(error)throw error;
+    actionResult=Array.isArray(data)?data[0]:data;entityId=parsed.data.transferId;
+  }}else if(action==="cashAccount"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("create_cash_account",{p_branch:parsed.data.branchId,p_name:parsed.data.name,p_type:parsed.data.accountType,p_method:parsed.data.paymentMethod,p_opening:parsed.data.openingBalance,p_actor:user!.id}); if(error)throw error; entityId=data;
  }else if(action==="expense"){
    if(parsed.data.fromCentral&&!user!.roles.includes("super_admin"))return Response.json({error:"الخزنة المركزية للمالك فقط"},{status:403});
@@ -197,6 +215,6 @@ export async function POST(request:Request){
  }else if(action==="purchase"){
    if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
- if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"?{result:actionResult}:{});
- return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{})});
+ if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive"?{result:actionResult}:{});
+ return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
 }
