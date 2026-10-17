@@ -24,7 +24,7 @@ This work stays on `fix/delivery-modal-daily-branch-ui` / PR #20. Do not merge t
 ## Financial integrity and cash controls
 - [x] Cash account balances in the operations view now use the full ledger balance RPC rather than summing only the latest 1,000 movements.
 - [x] Add append-only cash count reconciliation snapshots (book balance vs actual count), variance display, history, and audit events.
-- [x] Make sale payment retries idempotent using an operation ID, alongside the existing return idempotency key.
+- [x] Make sale payment retries idempotent using an operation ID, alongside the existing return idempotency key; enforce globally unique return operation IDs.
 - [x] Preserve return idempotency keys in the UI across uncertain responses; edits rotate the key.
 - [x] Keep corrections and cash count differences as auditable records; cash count does not silently modify the ledger.
 - [ ] Add end-to-end reconciliation tests covering duplicate submissions, concurrent payments, account balances, returns, and branch isolation.
@@ -33,7 +33,7 @@ This work stays on `fix/delivery-modal-daily-branch-ui` / PR #20. Do not merge t
 - [x] Add per-branch low-stock thresholds and low-stock warnings.
 - [x] Add an atomic stock-take workflow that records expected/count quantities and writes adjustment movements for differences.
 - [x] Split branch transfers into dispatch and receipt; stock leaves the source on dispatch and enters the destination only after receipt confirmation.
-- [x] Add idempotency keys to stock takes and transfer dispatch.
+- [x] Add idempotency keys to stock takes, transfer dispatch, and inventory adjustments.
 - [x] Capture a sale-line unit-cost snapshot for future profitability reports; historical cost snapshots are explicitly marked estimated.
 - [x] Add branch/product gross-profit and margin reports, receivables aging, slow-moving stock, and salesperson performance; include the insights in print/PDF output.
 - [ ] Validate cost averages, transfer receipt races, stock-take concurrency, return stock restoration, and historical-cost caveats against real staging data.
@@ -41,6 +41,8 @@ This work stays on `fix/delivery-modal-daily-branch-ui` / PR #20. Do not merge t
 ## Security and release readiness
 - [x] Scope customer search/directory results for non-owners to customers linked to their accessible branches or created by them.
 - [x] Review and harden the touched customer, payment, transfer, stock-take, cash-reconciliation, and reporting API paths with permission and branch checks.
+- [x] Use module-specific permissions for operations reads, restrict cash-account creation to the owner, and require owner approval for inventory writes.
+- [x] Persist cost snapshots for stock products and prescription lenses; mark legacy cost values as estimates.
 - [ ] Finish route-by-route authorization/RLS/grant review for every API route, view, and RPC.
 - [ ] Add automated tests for sale/payment/return/treasury idempotency, inventory races, branch isolation, and permissions.
 - [ ] Reconcile the existing staging migration baseline first (staging currently records only `20261017125800 deliver_sale_collect_balance` despite having the app schema), then apply migrations only to isolated staging; run migration validation, production build, smoke tests, and a backup/restore rehearsal.
