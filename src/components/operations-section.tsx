@@ -91,9 +91,9 @@ export default function OperationsSection({module,branches,branchIds,isOwner}:{m
    const operationId=stockCountOperationId||crypto.randomUUID();setStockCountOperationId(operationId);
    setBusy(true);setError("");setNotice("");
    try{
-     const result=await api("/api/operations",{method:"POST",body:JSON.stringify({action:"stockCount",branchId,operationId,items,notes:stockCountNotes})});
-     const row=result.stockCount;
-     setNotice("تم حفظ الجرد: "+Number(row?.items_count??items.length)+" صنف، وتسوية "+Number(row?.adjusted_items??0)+" صنف.");
+     const result=await api("/api/inventory/stock-takes",{method:"POST",body:JSON.stringify({branchId,operationId,counts:items,notes:stockCountNotes})});
+     const row=result.result;
+     setNotice("تم حفظ الجرد: "+Number(row?.countedItems??items.length)+" صنف، وتسوية "+Number(row?.adjustedItems??0)+" صنف.");
      setStockCountValues({});setStockCountNotes("");setStockCountOperationId("");
      await refresh();
    }catch(e){setError(e instanceof Error?e.message:"تعذر تسجيل الجرد");}
