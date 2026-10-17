@@ -921,6 +921,20 @@ export type Database = {
         }
         Returns: string
       }
+      process_sale_return: {
+        Args: {
+          p_actor: string
+          p_cash_account_id: string
+          p_idempotency_key: string
+          p_items: Json
+          p_reason: string
+          p_sale_id: string
+        }
+        Returns: {
+          refund_amount: number
+          return_id: string
+        }[]
+      }
       record_sale_payment: {
         Args: {
           p_amount: number
