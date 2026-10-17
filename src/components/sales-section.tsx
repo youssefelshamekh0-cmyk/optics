@@ -67,6 +67,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [returnCashAccountId, setReturnCashAccountId] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnOperationId, setReturnOperationId] = useState("");
   const [returnLoading, setReturnLoading] = useState(false);
 
   useEffect(() => { if (!branchId && availableBranches.length) setBranchId(availableBranches[0].id); }, [availableBranches, branchId]);
@@ -195,6 +196,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
       setReturnCashAccountId(result.accounts?.[0]?.id ?? "");
       setReturnReason("");
       setReturnQuantities({});
+      setReturnOperationId(crypto.randomUUID());
       setReturnSaleId(sale.id);
       if (!result.accounts?.length) setError("لا توجد خزنة نشطة في فرع الفاتورة لرد المبلغ");
     } catch (cause) {
@@ -211,10 +213,10 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await requestJson(`/api/sales/${sale.id}/returns`, { method: "POST", body: JSON.stringify({
-        idempotencyKey: crypto.randomUUID(), cashAccountId: returnCashAccountId, reason: returnReason, items: selectedItems,
+        idempotencyKey: returnOperationId || crypto.randomUUID(), cashAccountId: returnCashAccountId, reason: returnReason, items: selectedItems,
       }) });
       setNotice(`تم تسجيل المرتجع بنجاح — مبلغ الرد ${money(Number(result.refundAmount))}`);
-      setReturnSaleId(null); setReturnQuantities({}); setReturnReason("");
+      setReturnSaleId(null); setReturnQuantities({}); setReturnReason(""); setReturnOperationId("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تسجيل المرتجع"); }
     finally { setBusy(false); }
@@ -262,12 +264,12 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
                   <span>{item.item_name} · المباع {item.quantity}</span>
                   <input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1"
                     value={returnQuantities[item.id] ?? 0}
-                    onChange={(event) => setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) }))} />
+                    onChange={(event) => { setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) })); setReturnOperationId(crypto.randomUUID()); }} />
                 </label>)}
-                <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => setReturnCashAccountId(event.target.value)}>
+                <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => { setReturnCashAccountId(event.target.value); setReturnOperationId(crypto.randomUUID()); }}>
                   <option value="">اختر الخزنة</option>{returnAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {methodLabels[account.payment_method] ?? account.payment_method}</option>)}
                 </select></label>
-                <label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="اكتب سبب إرجاع الصنف" /></label>
+                <label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnOperationId(crypto.randomUUID()); }} placeholder="اكتب سبب إرجاع الصنف" /></label>
                 <button className="primary" disabled={busy || !returnCashAccountId || !returnReason.trim() || !sale.items.some((item) => Number(returnQuantities[item.id]) > 0)}>{busy ? "جارٍ تسجيل المرتجع…" : "تأكيد المرتجع ورد المبلغ"}</button>
               </form>}
             </div>}
