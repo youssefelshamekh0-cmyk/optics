@@ -231,9 +231,19 @@ export async function clearSyncedOfflineOperations(): Promise<void> {
 
 export function registerOfflineSync() {
   if (typeof window === "undefined") return () => undefined;
-  const sync = () => { void syncPendingSales(); };
+  const sync = async () => {
+    if (!navigator.onLine) return;
+    try {
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        if (typeof data.user?.id === "string") setOfflineActor(data.user.id);
+      }
+    } catch { /* Do not send queued operations until an authenticated session is reachable. */ }
+    await syncPendingSales();
+  };
   window.addEventListener("online", sync);
   window.addEventListener("focus", sync);
-  sync();
+  void sync();
   return () => { window.removeEventListener("online", sync); window.removeEventListener("focus", sync); };
 }
