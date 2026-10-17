@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     return Response.json({central:{id:account.data.id,name:account.data.name,balance:Number(balance.data??0),deposits:(rows.data??[]).map((x:any)=>({id:x.id,amount:Number(x.amount),description:x.description,created_at:x.created_at,seller:names.get(x.created_by)??"—"})),nonCashAccounts}});
   }
   if(module==="inventory") {
-    let stock=admin.from("branch_products").select("branch_id,product_id,quantity,cost_price,reference_price,products(name,sku,category)").order("updated_at",{ascending:false}).limit(300);
+    let stock=admin.from("branch_products").select("branch_id,product_id,quantity,low_stock_threshold,cost_price,reference_price,products(name,sku,category),branches(name)").order("updated_at",{ascending:false}).limit(1000);
     let moves=admin.from("stock_movements").select("id,branch_id,product_id,quantity_delta,movement_type,reason,created_at,products(name,sku),branches(name)").order("created_at",{ascending:false}).limit(100);
     let transfers=admin.from("inventory_transfers").select("id,operation_id,source_branch_id,destination_branch_id,product_id,quantity,reason,status,dispatched_at,received_at,products(name,sku)").eq("status","in_transit").order("dispatched_at",{ascending:false}).limit(200);
     if(branchId){stock=stock.eq("branch_id",branchId);moves=moves.eq("branch_id",branchId);transfers=transfers.or("source_branch_id.eq."+branchId+",destination_branch_id.eq."+branchId)} else if(!user!.roles.includes("super_admin")){stock=stock.in("branch_id",user!.branchIds);moves=moves.in("branch_id",user!.branchIds);const allowed=user!.branchIds.join(",");transfers=transfers.or("source_branch_id.in.("+allowed+"),destination_branch_id.in.("+allowed+")")}
