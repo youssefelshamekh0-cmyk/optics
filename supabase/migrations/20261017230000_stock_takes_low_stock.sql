@@ -68,7 +68,11 @@ begin
     if v_existing.branch_id<>p_branch_id or v_existing.created_by<>p_actor or v_existing.request_fingerprint<>v_fingerprint then
       raise exception 'stock take operation id conflict';
     end if;
-    return pg_catalog.jsonb_build_object('stockTakeId',v_existing.id,'replayed',true);
+    return pg_catalog.jsonb_build_object(
+      'stockTakeId',v_existing.id,'replayed',true,
+      'countedItems',(select count(*) from public.stock_take_items where stock_take_id=v_existing.id),
+      'adjustedItems',(select count(*) from public.stock_take_items where stock_take_id=v_existing.id and quantity_delta<>0)
+    );
   end if;
 
   if exists (
