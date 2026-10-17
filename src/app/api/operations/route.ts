@@ -112,7 +112,7 @@ export async function GET(request: Request) {
     if(branchId)q=q.eq("branch_id",branchId); else if(!user!.roles.includes("super_admin"))q=q.in("branch_id",user!.branchIds);
     const [p,s,products,branches]=await Promise.all([q,admin.from("suppliers").select("id,name,phone,active").eq("active",true).order("name"),admin.from("products").select("id,name,sku,category").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name")]);
     if(p.error||s.error||products.error||branches.error)throw p.error??s.error??products.error??branches.error;
-    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active,is_central").eq("active",true).order("name");if(branchId&&user!.roles.includes("super_admin"))accounts=accounts.or(`branch_id.eq.${branchId},is_central.eq.true`);else if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds);
+    let accounts=admin.from("cash_accounts").select("id,branch_id,name,payment_method,active,is_central").eq("active",true).order("name");if(branchId)accounts=accounts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))accounts=accounts.in("branch_id",user!.branchIds);
     const [accountsR,branchRows]=await Promise.all([accounts,(()=>{let q=admin.from("branches").select("id,name,code,status").order("name");if(!user!.roles.includes("super_admin"))q=q.in("id",user!.branchIds);return q;})()]);if(accountsR.error||branchRows.error)throw accountsR.error??branchRows.error;
     return Response.json({purchases:p.data??[],suppliers:s.data??[],products:products.data??[],branches:branchRows.data??[],accounts:accountsR.data??[]});
   }
@@ -240,8 +240,7 @@ export async function POST(request:Request){
      const account=await admin.from("cash_accounts").select("id,branch_id,is_central,active").eq("id",parsed.data.cashAccountId).maybeSingle();
      if(account.error)throw account.error;
      if(!account.data||!account.data.active)return Response.json({error:"خزنة الدفع غير موجودة أو غير نشطة"},{status:409});
-     if(account.data.is_central&&!user!.roles.includes("super_admin"))return Response.json({error:"الدفع من الخزنة المركزية متاح لمالك البراند فقط"},{status:403});
-     if(!account.data.is_central&&account.data.branch_id!==parsed.data.branchId)return Response.json({error:"اختر خزنة تابعة لفرع المشتريات"},{status:409});
+     if(account.data.is_central||account.data.branch_id!==parsed.data.branchId)return Response.json({error:"اختر خزنة تابعة لفرع المشتريات؛ لا تُسجل مشتريات الفرع على الخزنة المركزية"},{status:409});
    }
    const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
