@@ -134,9 +134,9 @@ async function localCustomerRows(query: string): Promise<Array<{ id: string; ful
   const normalized = query.trim().toLocaleLowerCase();
   if (normalized.length < 2) return [];
   const operations = await getActorOutbox();
-  return operations.filter(item => item.type === "customer.create" && item.status !== "synced" && item.localCustomerId)
+  return operations.filter(item => item.type === "customer.create" && item.localCustomerId)
     .map(item => ({
-      id: item.localCustomerId!,
+      id: item.status === "synced" && item.result?.customerId ? item.result.customerId : item.localCustomerId!,
       full_name: String(item.payload.name ?? ""),
       phone: String(item.payload.phone ?? ""),
       email: String(item.payload.email ?? ""),
