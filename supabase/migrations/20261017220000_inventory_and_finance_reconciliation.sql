@@ -465,3 +465,18 @@ end;
 $$;
 revoke all on function public.adjust_stock(uuid,uuid,integer,text,uuid) from public,anon,authenticated;
 grant execute on function public.adjust_stock(uuid,uuid,integer,text,uuid) to service_role;
+
+
+-- A return idempotency key is globally unique, not merely unique within one invoice.
+do $$
+begin
+  if exists (
+    select 1 from public.sale_returns
+    where idempotency_key is not null
+    group by idempotency_key having count(*)>1
+  ) then
+    raise exception 'duplicate legacy sale return idempotency keys require review before this migration can continue';
+  end if;
+end $$;
+create unique index if not exists sale_returns_idempotency_key_global_idx
+  on public.sale_returns(idempotency_key) where idempotency_key is not null;
