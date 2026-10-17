@@ -41,8 +41,13 @@ self.addEventListener("fetch", (event) => {
       }
       return response;
     }).catch(async () => {
-      const privateCache = await caches.open(PRIVATE_CACHE);
-      return (await privateCache.match(PRIVATE_SHELL_KEY)) || (await caches.match(OFFLINE_URL));
+      // Never serve the cached private dashboard for a login or other route.
+      if (url.pathname === "/dashboard") {
+        const privateCache = await caches.open(PRIVATE_CACHE);
+        const shell = await privateCache.match(PRIVATE_SHELL_KEY);
+        if (shell) return shell;
+      }
+      return (await caches.match(OFFLINE_URL)) || Response.error();
     }));
     return;
   }
