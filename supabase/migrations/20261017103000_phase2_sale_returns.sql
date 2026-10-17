@@ -153,7 +153,7 @@ begin
     where si.id = (v_item->>'saleItemId')::uuid and si.sale_id = p_sale_id;
 
     v_requested_qty := (v_item->>'quantity')::integer;
-    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 2);
+    v_effective_unit := round(v_sale_item.unit_price * v_sale.grand_total / v_reference_total, 4);
     v_line_refund := round(v_requested_qty * v_effective_unit, 2);
     insert into public.sale_return_items(return_id, sale_item_id, quantity, unit_refund)
     values(v_return_id, v_sale_item.id, v_requested_qty, v_effective_unit);
