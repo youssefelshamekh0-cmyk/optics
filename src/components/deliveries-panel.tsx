@@ -50,7 +50,8 @@ function printSlip(s: Sale) {
 export default function DeliveriesPanel({ branches, branchIds, isOwner }: { branches: Branch[]; branchIds: string[]; isOwner: boolean }) {
   const available = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && (isOwner || branchIds.includes(b.id))), [branches, branchIds, isOwner]);
   const [branchId, setBranchId] = useState("");
-  const [sales, setSales] = useState<Sale[]>([]);\n  const [brandLogo, setBrandLogo] = useState<string | null>(null);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [brandLogo, setBrandLogo] = useState<string | null>(null);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
   const [deliveryDialogSaleId, setDeliveryDialogSaleId] = useState<string | null>(null);
@@ -69,7 +70,8 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
       setSales(j.sales ?? []); setCashAccounts(j.accounts ?? []); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التسليمات"); }
   }, [branchId]);
-  useEffect(() => { void load(); }, [load]);\n  useEffect(() => { fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => { if (j?.logoDataUrl) setBrandLogo(j.logoDataUrl); }).catch(() => {}); }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => { if (j?.logoDataUrl) setBrandLogo(j.logoDataUrl); }).catch(() => {}); }, []);
 
   async function deliverAndCollect(saleId: string) {
     setBusy(true); setError(""); setNotice("");
