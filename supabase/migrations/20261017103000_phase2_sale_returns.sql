@@ -12,6 +12,8 @@ create table if not exists public.sale_returns (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
+alter table public.sale_returns add column if not exists idempotency_key uuid;
+alter table public.sale_returns add column if not exists request_items jsonb;
 create index if not exists sale_returns_sale_idx on public.sale_returns(sale_id, created_at desc);
 create unique index if not exists sale_returns_idempotency_idx on public.sale_returns(sale_id, idempotency_key) where idempotency_key is not null;
 
