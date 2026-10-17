@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   }
   if (module === "deliveries") {
     const { user, response } = await requirePermission("sales.read"); if (response) return response;
+    if(!user!.roles.includes("super_admin")&&user!.branchIds.length===0)return Response.json({accounts:[],sales:[]});
     const branchId = new URL(request.url).searchParams.get("branchId");
     if (branchId && !branchAllowed(user!, branchId)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
     const admin=getSupabaseAdmin() as any;
