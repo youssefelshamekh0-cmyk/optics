@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 
   const sales = salesR.data ?? [];
   const rawPayments = paymentsR.data ?? [];
-  const paidSaleIds = [...new Set(rawPayments.map((row: any) => row.sale_id))];
+  const paidSaleIds = [...new Set([...rawPayments.map((row: any) => row.sale_id), ...(saleLedgerR.data ?? []).map((row: any) => row.reference_id).filter(Boolean)])];
   const paidSalesR = paidSaleIds.length
     ? await admin.from("sales").select("id,branch_id,branches(name)").in("id", paidSaleIds)
     : { data: [], error: null };
