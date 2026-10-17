@@ -61,7 +61,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   }
 
-  const { data, error } = await admin.rpc("process_sale_return", {
+  const { data, error } = await (admin as any).rpc("process_sale_return", {
     p_sale_id: id,
     p_items: parsed.data.items,
     p_cash_account_id: parsed.data.cashAccountId,
