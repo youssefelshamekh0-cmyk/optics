@@ -140,6 +140,7 @@ export async function POST(request:Request){
  const {action}=parsed.data; const permission=action==="delivery"||action==="deliverAndCollect"?"deliveries.complete":action==="adjust"||action==="transfer"||action==="transferReceive"?"inventory.manage":action==="purchase"?"purchases.manage":action==="employee"||action.startsWith("payroll")?"staff.manage":action==="advanceRequest"?"payroll.advance.request":action==="timeOffRequest"?"branches.read":action==="timeOffCancel"?"branches.read":action==="timeOffDecision"?"staff.manage":action==="expense"&&!((await getCurrentUser())?.roles.includes("super_admin"))?"expenses.create":"finance.manage";
  const {user,response}=await requirePermission(permission); if(response)return response;
  if(["adjust","transfer","transferReceive"].includes(action)&&!user!.roles.includes("super_admin"))return Response.json({error:"تعديلات المخزون والتحويلات تتطلب اعتماد مالك البراند"},{status:403});
+ if(["employee","payrollCreate","timeOffDecision"].includes(action)&&!user!.roles.includes("super_admin"))return Response.json({error:"إدارة الموظفين والرواتب واعتماد الإجازات متاح لمالك البراند فقط"},{status:403});
  if(!(await requireSameOrigin(request)))return Response.json({error:"الطلب غير صالح"},{status:403});
  const admin=getSupabaseAdmin() as any; let entityId=""; let actionResult:any=null;
  if(action==="cashReconcile"){
