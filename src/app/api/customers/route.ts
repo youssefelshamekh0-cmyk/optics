@@ -31,7 +31,8 @@ export async function GET(request: Request) {
     const normalized = normalizeEgyptianPhone(phoneQuery);
     if (!normalized) return Response.json({ customer: null });
     let phoneSearch: any = admin.from("customers").select("id,full_name,phone,email,notes").eq("phone", normalized.phone);
-    if (allowedCustomerIds) phoneSearch = phoneSearch.in("id", allowedCustomerIds);\n    const { data, error } = await phoneSearch.maybeSingle();
+    if (allowedCustomerIds) phoneSearch = phoneSearch.in("id", allowedCustomerIds);
+    const { data, error } = await phoneSearch.maybeSingle();
     if (error) throw error;
     return Response.json({ customer: data });
   }
