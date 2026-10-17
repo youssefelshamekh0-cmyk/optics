@@ -8,7 +8,7 @@ create table if not exists public.staff_time_off_requests (
  starts_at timestamptz not null,
  ends_at timestamptz not null,
  reason varchar(500) not null,
- status text not null default 'pending' check (status in ('pending','approved','rejected')),
+ status text not null default 'pending' check (status in ('pending','approved','rejected','cancelled')),
  reviewed_by uuid references auth.users(id) on delete set null,
  reviewed_at timestamptz,
  reviewer_note varchar(500),
