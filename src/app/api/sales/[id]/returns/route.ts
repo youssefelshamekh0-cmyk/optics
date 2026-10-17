@@ -4,6 +4,7 @@ import { requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
 const returnSchema = z.object({
+  idempotencyKey: z.string().uuid(),
   cashAccountId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
   items: z.array(z.object({
@@ -48,6 +49,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     p_cash_account_id: parsed.data.cashAccountId,
     p_reason: parsed.data.reason,
     p_actor: user!.id,
+    p_idempotency_key: parsed.data.idempotencyKey,
   });
   if (error) {
     const message = error.message ?? "";
