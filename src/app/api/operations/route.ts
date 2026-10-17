@@ -69,17 +69,17 @@ export async function GET(request: Request) {
     if(branchId){stock=stock.eq("branch_id",branchId);moves=moves.eq("branch_id",branchId);transfers=transfers.or("source_branch_id.eq."+branchId+",destination_branch_id.eq."+branchId)} else if(!user!.roles.includes("super_admin")){stock=stock.in("branch_id",user!.branchIds);moves=moves.in("branch_id",user!.branchIds);const allowed=user!.branchIds.join(",");transfers=transfers.or("source_branch_id.in.("+allowed+"),destination_branch_id.in.("+allowed+")")}
     let counts:any=null;
     if(user!.roles.includes("super_admin")){
-      counts=admin.from("inventory_stock_counts").select("id,branch_id,notes,created_by,created_at").order("created_at",{ascending:false}).limit(50);
+      counts=admin.from("stock_takes").select("id,branch_id,notes,created_by,created_at").order("created_at",{ascending:false}).limit(50);
       if(branchId)counts=counts.eq("branch_id",branchId);
     }
     const [s,m,p,b,t,countsR]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name"),transfers,counts??Promise.resolve({data:[],error:null})]);
     if(s.error||m.error||p.error||b.error||t.error||countsR.error)throw s.error??m.error??p.error??b.error??t.error??countsR.error;
     const branchNames=new Map((b.data??[]).map((row:any)=>[row.id,row.name]));
     const countIds=(countsR.data??[]).map((row:any)=>row.id);
-    const countItemsR=countIds.length?await admin.from("inventory_stock_count_items").select("count_id,quantity_delta").in("count_id",countIds):{data:[],error:null};
+    const countItemsR=countIds.length?await admin.from("stock_take_items").select("stock_take_id,quantity_delta").in("stock_take_id",countIds):{data:[],error:null};
     if(countItemsR.error)throw countItemsR.error;
     const countItemsById=new Map<string,{items:number;adjusted:number}>();
-    for(const item of countItemsR.data??[]){const row=countItemsById.get(item.count_id)??{items:0,adjusted:0};row.items++;if(Number(item.quantity_delta)!==0)row.adjusted++;countItemsById.set(item.count_id,row);}
+    for(const item of countItemsR.data??[]){const row=countItemsById.get(item.stock_take_id)??{items:0,adjusted:0};row.items++;if(Number(item.quantity_delta)!==0)row.adjusted++;countItemsById.set(item.stock_take_id,row);}
     return Response.json({stock:s.data??[],movements:m.data??[],products:p.data??[],branches:b.data??[],stockCounts:(countsR.data??[]).map((row:any)=>({...row,branchName:branchNames.get(row.branch_id)??"—",itemsCount:countItemsById.get(row.id)?.items??0,adjustedItems:countItemsById.get(row.id)?.adjusted??0})),transfers:(t.data??[]).map((row:any)=>({...row,sourceBranchName:branchNames.get(row.source_branch_id)??"—",destinationBranchName:branchNames.get(row.destination_branch_id)??"—"}))});
   }
   if(module==="finance") {
