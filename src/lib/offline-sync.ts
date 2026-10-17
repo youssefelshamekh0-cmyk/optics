@@ -323,11 +323,13 @@ export async function reviseOfflineSale(id: string, edits: { finalTotal: number;
   if (!Number.isFinite(edits.finalTotal) || edits.finalTotal <= 0 || edits.items.length < 1 || edits.items.length > 20) {
     throw new Error("راجع سعر البيع والبنود");
   }
-  const normalizedItems = edits.items.map(item => ({
+  const originalItems = Array.isArray(operation.payload.items) ? operation.payload.items as Array<Record<string, unknown>> : [];
+  const normalizedItems = edits.items.map((item, index) => ({
+    ...(originalItems[index] ?? {}),
     name: String(item.name ?? "").trim(),
     quantity: Number(item.quantity),
-    productId: item.productId ?? null,
-    itemKind: item.itemKind ?? "product",
+    productId: item.productId ?? originalItems[index]?.productId ?? null,
+    itemKind: item.itemKind ?? String(originalItems[index]?.itemKind ?? "product"),
   }));
   if (normalizedItems.some(item => item.name.length < 2 || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 100)) {
     throw new Error("اسم أو كمية أحد البنود غير صحيحة");
