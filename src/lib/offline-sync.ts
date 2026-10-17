@@ -176,7 +176,7 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
     const raw = typeof init?.body === "string" ? init.body : "{}";
     const payload = JSON.parse(raw) as Record<string, unknown>;
     const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
-    const safePayload = { ...payload, operationId };
+    const safePayload: Record<string, unknown> & { operationId: string } = { ...payload, operationId };
     const actorId = storedActorId();
     if (!actorId) throw new Error("لا يمكن حفظ العميل دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");
     try {
