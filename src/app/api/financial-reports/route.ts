@@ -37,11 +37,19 @@ export async function GET(request: Request) {
     if (result.error) return Response.json({ error: "تعذر تحميل بيانات التقرير المالي" }, { status: 500 });
   }
   const sales = salesR.data ?? [];
-  const saleIds = sales.map((x: any) => x.id);
-  const paymentsR = saleIds.length
-    ? await admin.from("sale_payments").select("id,sale_id,amount,created_at").in("sale_id", saleIds).gte("created_at", start).lt("created_at", end).limit(10000)
-    : { data: [], error: null };
+  const paymentsR = await admin.from("sale_payments").select("id,sale_id,amount,created_at").gte("created_at", start).lt("created_at", end).limit(10000);
   if (paymentsR.error) return Response.json({ error: "تعذر تحميل تحصيلات الفترة" }, { status: 500 });
+  const rawPayments = paymentsR.data ?? [];
+  const paidSaleIds = [...new Set(rawPayments.map((x: any) => x.sale_id))];
+  const paidSalesR = paidSaleIds.length
+    ? await admin.from("sales").select("id,branch_id,branches(name)").in("id", paidSaleIds)
+    : { data: [], error: null };
+  if (paidSalesR.error) return Response.json({ error: "تعذر ربط التحصيلات بالفروع" }, { status: 500 });
+  const paidSaleBranch = new Map((paidSalesR.data ?? []).map((x: any) => [x.id, x.branch_id]));
+  const payments = rawPayments.filter((x: any) => {
+    const id = paidSaleBranch.get(x.sale_id);
+    return id && (!branchId || id === branchId);
+  });
   const expenses = expensesR.data ?? [];
   const purchases = purchasesR.data ?? [];
   const payroll = (payrollR.data ?? []).filter((x: any) => !branchId || x.employees?.branch_id === branchId);
@@ -64,8 +72,7 @@ export async function GET(request: Request) {
     byBranch.get(id)[key] += value;
   };
   sales.forEach((x: any) => add(x.branch_id, "invoiced", Number(x.grand_total)));
-  const saleBranch = new Map(sales.map((x: any) => [x.id, x.branch_id]));
-  payments.forEach((x: any) => { const id = saleBranch.get(x.sale_id); if (id) add(id, "collected", Number(x.amount)); });
+  payments.forEach((x: any) => { const id = paidSaleBranch.get(x.sale_id); if (id) add(id, "collected", Number(x.amount)); });
   expenses.forEach((x: any) => add(x.branch_id, "expenses", Number(x.amount)));
   purchases.forEach((x: any) => add(x.branch_id, "purchasesPaid", Number(x.amount_paid)));
   payroll.forEach((x: any) => { const id = x.employees?.branch_id; if (id) add(id, "payrollPaid", Number(x.amount_paid)); });
@@ -77,7 +84,7 @@ export async function GET(request: Request) {
     summary: { salesCount: sales.length, invoiced, collected, expenses: expenseTotal, purchasesPaid: purchaseTotal, payrollPaid: payrollTotal, netCashFlow: collected - expenseTotal - purchaseTotal - payrollTotal },
     byBranch: branchRows,
     sales: sales.map((x: any) => ({ ...x, grand_total: Number(x.grand_total) })),
-    collections: payments.map((x: any) => ({ ...x, amount: Number(x.amount), branchId: saleBranch.get(x.sale_id) })),
+    collections: payments.map((x: any) => ({ ...x, amount: Number(x.amount), branchId: paidSaleBranch.get(x.sale_id) })),
     expenses,
     purchases,
     payroll: payroll.map((x: any) => ({ ...x, base_salary: Number(x.base_salary), commission_amount: Number(x.commission_amount), deductions: Number(x.deductions), amount_paid: Number(x.amount_paid), employeeName: (employeesR.data ?? []).find((e: any) => e.id === x.employee_id)?.full_name ?? "موظف" })),
