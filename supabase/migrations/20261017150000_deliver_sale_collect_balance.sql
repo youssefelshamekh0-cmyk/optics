@@ -1,5 +1,5 @@
 -- Atomically complete delivery and collect the entire remaining balance into the selected branch cash account.
-create or replace function public.deliver_sale_and_collect_balance(p_sale_id uuid,p_actor uuid,p_cash_account uuid default null)
+create or replace function public.deliver_sale_and_collect_balance(p_sale_id uuid,p_actor uuid,p_cash_account uuid default null,p_discount_amount numeric(12,2) default 0)
 returns uuid
 language plpgsql
 security definer
@@ -7,6 +7,7 @@ set search_path = ''
 as $$
 declare
   v_total numeric(12,2);
+  v_subtotal numeric(12,2);
   v_status text;
   v_branch uuid;
   v_paid numeric(12,2);
@@ -15,14 +16,18 @@ declare
   v_method text;
   v_payment uuid;
 begin
-  select grand_total,delivery_status,branch_id
-    into v_total,v_status,v_branch
+  select total_amount,delivery_status,branch_id
+    into v_subtotal,v_status,v_branch
     from public.sales
     where id=p_sale_id
     for update;
   if not found then raise exception 'sale not found'; end if;
   if v_status='cancelled' then raise exception 'cancelled sale'; end if;
   if v_status='delivered' then raise exception 'already delivered'; end if;
+
+  if p_discount_amount < 0 or p_discount_amount > v_subtotal then raise exception 'invalid discount amount'; end if;
+  update public.sales set discount_amount=p_discount_amount,updated_at=now() where id=p_sale_id;
+  v_total:=v_subtotal-p_discount_amount;
 
   select coalesce(sum(amount),0) into v_paid
     from public.sale_payments where sale_id=p_sale_id;
@@ -45,10 +50,10 @@ begin
 
   update public.sales set delivery_status='delivered',updated_at=now() where id=p_sale_id;
   insert into public.sale_delivery_events(sale_id,from_status,to_status,changed_by,notes)
-    values(p_sale_id,v_status,'delivered',p_actor,'تم التسليم وتسجيل كامل المتبقي في حساب الخزنة المختار');
+    values(p_sale_id,v_status,'delivered',p_actor,'تم التسليم بعد مراجعة الفاتورة وتطبيق الخصم وتسجيل المتبقي في حساب الخزنة المختار');
   return v_payment;
 end;
 $$;
 
-revoke all on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid) from public,anon,authenticated;
-grant execute on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid) to service_role;
+revoke all on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid,numeric) from public,anon,authenticated;
+grant execute on function public.deliver_sale_and_collect_balance(uuid,uuid,uuid,numeric) to service_role;
