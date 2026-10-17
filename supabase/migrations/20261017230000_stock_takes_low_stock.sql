@@ -60,6 +60,9 @@ begin
      or jsonb_array_length(p_counts) > 500 then
     raise exception 'invalid stock take request';
   end if;
+  if not exists(select 1 from public.branches where id=p_branch_id and status='active') then
+    raise exception 'stock take branch inactive';
+  end if;
 
   v_fingerprint := pg_catalog.md5(pg_catalog.jsonb_build_object('branchId',p_branch_id,'counts',p_counts,'notes',trim(coalesce(p_notes,'')))::text);
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_operation_id::text,0));
