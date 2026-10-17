@@ -34,5 +34,12 @@ The connected Supabase account currently lists only one project: `optics system`
 - Every return records both the financial disposition and the stock disposition, with authorization and an auditable reference.
 - Tests run only on isolated staging data; attach results to the pull request before review.
 
+## Changes committed on the phase2 branch
+- Validate that the final invoice total is positive and does not exceed the calculated item total; derive and persist the discount in the database function.
+- Lock invoice stock rows in product-ID order to reduce deadlocks when concurrent sales include the same products in different orders.
+- Return exact remaining balances and a `payment_balance_error` flag instead of silently clamping overpayment to zero.
+- Add `process_sale_return` migration and `POST /api/sales/[id]/returns` endpoint for partial/full item returns, stock restoration, refund cap, cash ledger, permission check, and audit log.
+- Prorate invoice discounts across returned item quantities so a return uses the effective discounted unit price rather than the reference price.
+
 ## Next implementation gate
-Create/confirm an isolated Supabase staging project, configure Vercel Preview environment variables to use it, and reconcile schema/migrations there. Only then implement fixes and run write/concurrency tests.
+Create/confirm an isolated Supabase staging project, configure Vercel Preview environment variables to use it, reconcile schema/migrations, then run build and write/concurrency tests there. Do not apply migrations or test writes against production.
