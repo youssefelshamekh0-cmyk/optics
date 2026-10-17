@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { InstallPrompt, PwaRegister } from "@/components/pwa";
+import OfflineSyncStatus from "@/components/offline-sync-status";
 
 export const metadata: Metadata = {
   title: "نظرة | إدارة الفروع",
@@ -12,5 +13,5 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: "#27685f", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ar" dir="rtl"><body>{children}<PwaRegister /><InstallPrompt /></body></html>;
+  return <html lang="ar" dir="rtl"><body>{children}<PwaRegister /><InstallPrompt /><OfflineSyncStatus /></body></html>;
 }
