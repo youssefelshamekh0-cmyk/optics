@@ -5,7 +5,7 @@ import { hoursLabel } from "@/components/shift-panel";
 type Payroll = { id: string; period_start: string; period_end: string; base_salary: number; commission_amount: number; deductions: number; amount_paid: number; status: string };
 type Account = {
   name: string; phone: string; isOwner: boolean; week: { start: string; end: string };
-  salary: null | { jobTitle: string; branch: string | null; weeklySalary: number; commissionRate: number; weekSeconds: number; weekSales: number; weekCommission: number; payroll: Payroll[] };
+  salary: null | { jobTitle: string; branches: string[]; weeklySalary: number; commissionRate: number; weekSeconds: number; weekSales: number; weekCommission: number; payroll: Payroll[] };
 };
 const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
 const dayText = (d: string) => new Intl.DateTimeFormat("ar-EG", { day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
@@ -50,7 +50,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
         {error && <div className="wide notice error" role="alert">{error}</div>}{notice && <div className="wide notice success" role="status">{notice}</div>}
         <button className="primary" disabled={busy}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
       </form></section>
-    {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2></div>{s && <span className="count-badge">{s.jobTitle}{s.branch ? ` · ${s.branch}` : ""}</span>}</div>
+    {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2>{s && s.branches.length > 0 && <p className="footnote">الفروع: {s.branches.join("، ")}</p>}</div>{s && <span className="count-badge">{s.jobTitle}</span>}</div>
       {!data ? <p className="footnote">جارٍ التحميل…</p> : !s ? <p className="footnote">لم يُسجَّل لك مرتب بعد. اطلب من المالك ربط حسابك بسجل موظف.</p> : <>
         <div className="account-kpis">
           <article><span>المرتب الأسبوعي</span><strong>{money(s.weeklySalary)}</strong><small>يُصرف كل أسبوع</small></article>
@@ -62,7 +62,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
           {s.payroll.map((p) => <tr key={p.id}><td>{dayText(p.period_start)} – {dayText(p.period_end)}</td><td>{money(p.base_salary)}</td><td>{money(p.commission_amount)}</td><td>{money(p.deductions)}</td><td>{money(p.amount_paid)}</td><td>{p.status === "pending" ? "قيد الصرف" : "تم الصرف"}</td></tr>)}
           {s.payroll.length === 0 && <tr><td colSpan={6} className="table-empty">لا توجد كشوف رواتب بعد.</td></tr>}
         </tbody></table></div>
-        <p className="footnote">العمولة المعروضة تقديرية حتى يُعتمد كشف الأسبوع من المالك.</p></>}
+        <p className="footnote">الساعات والعمولة محسوبة على كل فروعك معًا. العمولة المعروضة تقديرية حتى يُعتمد كشف الأسبوع من المالك.</p></>}
     </section>}
   </div>;
 }

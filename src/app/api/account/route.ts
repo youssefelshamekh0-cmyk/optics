@@ -13,8 +13,12 @@ export async function GET() {
   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
   const admin = getSupabaseAdmin() as any;
   const week = currentWeek();
-  const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate,branches(name)").eq("user_id", user.id).maybeSingle();
+  const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate").eq("user_id", user.id).maybeSingle();
   if (error) throw error;
+  // A seller can be registered in several branches; hours, sales and commission below count across all of them.
+  const branchRows = user.branchIds.length ? await admin.from("branches").select("name").in("id", user.branchIds).order("name") : { data: [], error: null };
+  if (branchRows.error) throw branchRows.error;
+  const branchNames: string[] = (branchRows.data ?? []).map((b: any) => b.name);
   const base = { name: user.name, phone: user.phone, isOwner: user.roles.includes("super_admin"), week: { start: week.start, end: week.end } };
   if (!employee || base.isOwner) return Response.json({ ...base, salary: null });
 
@@ -31,7 +35,7 @@ export async function GET() {
   return Response.json({
     ...base,
     salary: {
-      jobTitle: employee.job_title, branch: employee.branches?.name ?? null,
+      jobTitle: employee.job_title, branches: branchNames,
       weeklySalary: Number(employee.base_salary), commissionRate: rate,
       weekSeconds, weekSales: rate > 0 ? weekSales : 0, weekCommission: Math.round(weekSales * rate) / 100,
       payroll: (payroll.data ?? []).map((p: any) => ({ ...p, base_salary: Number(p.base_salary), commission_amount: Number(p.commission_amount), deductions: Number(p.deductions), amount_paid: Number(p.amount_paid) })),

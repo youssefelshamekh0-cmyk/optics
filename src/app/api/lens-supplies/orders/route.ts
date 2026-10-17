@@ -14,7 +14,8 @@ const bodySchema = z.object({
   branchId: z.string().uuid(), company: z.string().trim().min(1).max(120),
   invoiceNumber: z.string().trim().min(1).max(100), supplierName: z.string().trim().min(2).max(160),
   supplierPhone: z.string().trim().max(40).default(""), receivedAt: z.string().datetime(),
-  items: z.array(z.object({ saleItemId: z.string().uuid(), unitCost: z.number().finite().min(0).max(10000000) })).min(1).max(200),
+  totalAmount: z.number().finite().min(0).max(100000000),
+  saleItemIds: z.array(z.string().uuid()).min(1).max(200),
 });
 
 /** Ordered (not yet received) prescription lenses of a branch, grouped by lens company. */
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "راجع بيانات الفاتورة والعدسات المستلمة" }, { status: 400 });
   const input = parsed.data;
-  const ids = input.items.map((i) => i.saleItemId);
+  const ids = input.saleItemIds;
   if (new Set(ids).size !== ids.length) return Response.json({ error: "عدسة مكررة في الفاتورة" }, { status: 400 });
   const admin = getSupabaseAdmin() as any;
 
@@ -66,7 +67,10 @@ export async function POST(request: Request) {
   if ((lines ?? []).length !== ids.length) return Response.json({ error: "إحدى العدسات غير موجودة" }, { status: 400 });
   if ((lines ?? []).some((l: any) => String(l.technical_details?.company ?? "") !== input.company)) return Response.json({ error: "كل العدسات في الفاتورة يجب أن تكون من نفس الشركة" }, { status: 400 });
 
-  const costById = new Map(input.items.map((i) => [i.saleItemId, i.unitCost]));
+  // The owner types the whole supplier invoice amount; it is split evenly per lens in cents (remainder goes to the first lenses).
+  const totalCents = Math.round(input.totalAmount * 100);
+  const baseCents = Math.floor(totalCents / ids.length), extraCents = totalCents - baseCents * ids.length;
+  const costById = new Map(ids.map((id, i) => [id, (baseCents + (i < extraCents ? 1 : 0)) / 100]));
   // The supply invoice keeps a catalogue product per lens type (created once, reused afterwards).
   const productByName = new Map<string, string>();
   const rpcItems: { saleItemId: string; productId: string; unitCost: number }[] = [];
