@@ -67,9 +67,12 @@ export async function GET(request: Request) {
     let moves=admin.from("stock_movements").select("id,branch_id,product_id,quantity_delta,movement_type,reason,created_at,products(name,sku),branches(name)").order("created_at",{ascending:false}).limit(100);
     let transfers=admin.from("inventory_transfers").select("id,operation_id,source_branch_id,destination_branch_id,product_id,quantity,reason,status,dispatched_at,received_at,products(name,sku)").eq("status","in_transit").order("dispatched_at",{ascending:false}).limit(200);
     if(branchId){stock=stock.eq("branch_id",branchId);moves=moves.eq("branch_id",branchId);transfers=transfers.or("source_branch_id.eq."+branchId+",destination_branch_id.eq."+branchId)} else if(!user!.roles.includes("super_admin")){stock=stock.in("branch_id",user!.branchIds);moves=moves.in("branch_id",user!.branchIds);const allowed=user!.branchIds.join(",");transfers=transfers.or("source_branch_id.in.("+allowed+"),destination_branch_id.in.("+allowed+")")}
-    let counts=admin.from("inventory_stock_counts").select("id,branch_id,notes,created_by,created_at").order("created_at",{ascending:false}).limit(50);
-    if(branchId)counts=counts.eq("branch_id",branchId);else if(!user!.roles.includes("super_admin"))counts=counts.in("branch_id",user!.branchIds);
-    const [s,m,p,b,t,countsR]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name"),transfers,counts]);
+    let counts:any=null;
+    if(user!.roles.includes("super_admin")){
+      counts=admin.from("inventory_stock_counts").select("id,branch_id,notes,created_by,created_at").order("created_at",{ascending:false}).limit(50);
+      if(branchId)counts=counts.eq("branch_id",branchId);
+    }
+    const [s,m,p,b,t,countsR]=await Promise.all([stock,moves,admin.from("products").select("id,name,sku,category,active").eq("active",true).order("name"),admin.from("branches").select("id,name,code,status").order("name"),transfers,counts??Promise.resolve({data:[],error:null})]);
     if(s.error||m.error||p.error||b.error||t.error||countsR.error)throw s.error??m.error??p.error??b.error??t.error??countsR.error;
     const branchNames=new Map((b.data??[]).map((row:any)=>[row.id,row.name]));
     const countIds=(countsR.data??[]).map((row:any)=>row.id);
