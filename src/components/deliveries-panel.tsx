@@ -14,43 +14,43 @@ const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency",
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const dateOf = (iso: string) => new Date(iso).toLocaleDateString("ar-EG");
 
-const PRINT_CSS = `*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#1e292c;margin:24px;font-size:13px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px}.meta{color:#69767a;font-size:12px;margin-bottom:14px}
-table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border:1px solid #cfd8d3;padding:7px 9px;text-align:right;vertical-align:top}th{background:#eef4f0;font-size:12px}small{display:block;color:#69767a;font-size:11px}
-.totals{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.totals div{border:1px solid #cfd8d3;border-radius:8px;padding:8px 10px}.totals b{display:block;font-size:15px;margin-top:2px}.due b{color:#a34039}
+const PRINT_CSS = `*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#24312e;margin:0 auto;padding:24px;max-width:1100px;font-size:12px;line-height:1.65;background:#fff}h1{font-size:23px;letter-spacing:-.3px;margin:0 0 5px;color:#174f48}h2{font-size:15px;margin:20px 0 8px;color:#174f48;border-bottom:1px solid #dce8e2;padding-bottom:6px}.meta{color:#65746e;font-size:11px;margin-bottom:16px}.print-brand{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 0 18px;margin-bottom:20px;border-bottom:3px solid #27685f}.print-brand img{max-width:170px;max-height:76px;object-fit:contain}.brand-fallback{font-size:18px;font-weight:bold;color:#27685f}.print-brand small{display:block;color:#65746e;font-size:10px;font-weight:normal}
+table{width:100%;border-collapse:collapse;margin-top:8px;border:1px solid #dce5e0;border-radius:8px;overflow:hidden}th,td{border-bottom:1px solid #e4ebe7;padding:9px 10px;text-align:right;vertical-align:top}th{background:#edf4f0;color:#245b52;font-size:11px;font-weight:bold}tbody tr:nth-child(even){background:#fafcfb}tbody tr:last-child td{border-bottom:0}small{display:block;color:#697a74;font-size:10px}
+.totals{margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.totals div{border:1px solid #dce5e0;border-radius:10px;padding:11px 13px;background:#f8fbf9}.totals b{display:block;font-size:16px;margin-top:3px;color:#174f48}.due b{color:#a34039}
 .sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:46px}.sign div{border-top:1px solid #1e292c;padding-top:6px;text-align:center;font-size:12px}.brand{font-size:12px;color:#27685f;font-weight:bold;margin-bottom:10px}
-@media print{body{margin:10mm}}`;
+@page{size:A4;margin:12mm}@media print{body{padding:0;max-width:none;font-size:11px}.print-brand{break-inside:avoid}.totals div{break-inside:avoid}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid;break-after:auto}}`;
 
 /** Print an HTML document through a hidden iframe (no pop-up window needed). */
-function printHtml(title: string, body: string) {
+function printHtml(title: string, body: string, logoDataUrl: string | null) {
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
-  frame.srcdoc = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body>${body}</body></html>`;
+  frame.srcdoc = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body><header class="print-brand">${logoDataUrl ? `<img src="${esc(logoDataUrl)}" alt="شعار البراند">` : `<div class="brand-fallback">نظرة <small>إدارة الفروع</small></div>`}<div><small>مستند رسمي</small><strong>${esc(title)}</strong></div></header>${body}</body></html>`;
   frame.onload = () => { const w = frame.contentWindow; if (!w) return; w.focus(); w.print(); setTimeout(() => frame.remove(), 60000); };
   document.body.appendChild(frame);
 }
 
 function printList(rows: Sale[], branchName: string, filters: string) {
   const total = rows.reduce((s, r) => s + Number(r.grand_total), 0), paid = rows.reduce((s, r) => s + r.paid_amount, 0), due = rows.reduce((s, r) => s + r.due_amount, 0);
-  printHtml("قائمة التسليمات", `<div class="brand">نظرة | إدارة الفروع</div><h1>قائمة التسليمات</h1><div class="meta">${esc(branchName)} — ${esc(filters)} — طُبعت ${esc(new Date().toLocaleString("ar-EG"))}</div>
+  printHtml("قائمة التسليمات", `<h1>قائمة التسليمات</h1><div class="meta">${esc(branchName)} — ${esc(filters)} — طُبعت ${esc(new Date().toLocaleString("ar-EG"))}</div>
   <table><thead><tr><th>#</th><th>الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الهاتف</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
   ${rows.map((r, i) => `<tr><td>${i + 1}</td><td>#${r.invoice_number}</td><td>${esc(dateOf(r.created_at))}</td><td>${esc(r.customers?.full_name)}</td><td>${esc(r.customers?.phone)}</td><td>${esc(r.branches?.name)}</td><td>${esc(money(Number(r.grand_total)))}</td><td>${r.due_amount > 0 ? esc(money(r.due_amount)) : "—"}</td><td>${esc(statusLabel[r.delivery_status])}</td></tr>`).join("") || `<tr><td colspan="9">لا توجد فواتير مطابقة</td></tr>`}</tbody></table>
-  <div class="totals"><div>عدد الفواتير<b>${rows.length}</b></div><div>الإجمالي<b>${esc(money(total))}</b></div><div class="due">المتبقي<b>${esc(money(due))}</b></div></div><div class="meta" style="margin-top:8px">المدفوع: ${esc(money(paid))}</div>`);
+  <div class="totals"><div>عدد الفواتير<b>${rows.length}</b></div><div>الإجمالي<b>${esc(money(total))}</b></div><div class="due">المتبقي<b>${esc(money(due))}</b></div></div><div class="meta" style="margin-top:8px">المدفوع: ${esc(money(paid))}</div>`, brandLogo);
 }
 
 function printSlip(s: Sale) {
   const items = s.sale_items ?? [];
-  printHtml(`فاتورة ${s.invoice_number}`, `<div class="brand">نظرة | إدارة الفروع</div><h1>فاتورة #${s.invoice_number}</h1><div class="meta">${esc(s.branches?.name)} — ${esc(dateOf(s.created_at))} — الحالة: ${esc(statusLabel[s.delivery_status])}</div>
+  printHtml(`فاتورة ${s.invoice_number}`, `<h1>فاتورة #${s.invoice_number}</h1><div class="meta">${esc(s.branches?.name)} — ${esc(dateOf(s.created_at))} — الحالة: ${esc(statusLabel[s.delivery_status])}</div>
   <h2>العميل</h2><table><tbody><tr><th>الاسم</th><td>${esc(s.customers?.full_name)}</td><th>الهاتف</th><td>${esc(s.customers?.phone)}</td></tr></tbody></table>
   <h2>البنود</h2><table><thead><tr><th>البند</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${items.map((i) => `<tr><td>${esc(i.item_name)}</td><td>${esc(i.quantity)}</td><td>${esc(money(Number(i.unit_price)))}</td><td>${esc(money(Number(i.line_total)))}</td></tr>`).join("") || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
   <div class="totals"><div>الإجمالي<b>${esc(money(Number(s.grand_total)))}</b></div><div>المدفوع<b>${esc(money(s.paid_amount))}</b></div><div class="due">المتبقي<b>${esc(money(s.due_amount))}</b></div></div>
-  ${s.notes ? `<h2>ملاحظات</h2><p>${esc(s.notes)}</p>` : ""}<div class="sign"><div>توقيع المستلم</div><div>توقيع الموظف</div></div>`);
+  ${s.notes ? `<h2>ملاحظات</h2><p>${esc(s.notes)}</p>` : ""}<div class="sign"><div>توقيع المستلم</div><div>توقيع الموظف</div></div>`, brandLogo);
 }
 
 export default function DeliveriesPanel({ branches, branchIds, isOwner }: { branches: Branch[]; branchIds: string[]; isOwner: boolean }) {
   const available = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && (isOwner || branchIds.includes(b.id))), [branches, branchIds, isOwner]);
   const [branchId, setBranchId] = useState("");
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);\n  const [brandLogo, setBrandLogo] = useState<string | null>(null);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
   const [deliveryDialogSaleId, setDeliveryDialogSaleId] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
       setSales(j.sales ?? []); setCashAccounts(j.accounts ?? []); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التسليمات"); }
   }, [branchId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);\n  useEffect(() => { fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.ok ? r.json() : null).then((j) => { if (j?.logoDataUrl) setBrandLogo(j.logoDataUrl); }).catch(() => {}); }, []);
 
   async function deliverAndCollect(saleId: string) {
     setBusy(true); setError(""); setNotice("");
