@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { clock, hoursLabel } from "@/components/shift-panel";
 
+type DayRow = { date: string; invoices: number; sales: number; income: number; expenses: number; variance: number | null; shifts: number; status: "deficit" | "surplus" | "balanced" | "open" | "unknown" };
 type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; due: number; status: string; created_at: string };
 type Daily = {
   role: "owner" | "seller"; date: string; today: string; branches: { id: string; name: string }[]; branchId: string;
