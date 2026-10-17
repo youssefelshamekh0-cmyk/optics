@@ -52,8 +52,14 @@ export async function POST(request: Request) {
   if (error?.message.includes("operation id conflict")) return Response.json({ error: "معرّف عملية الجرد مستخدم لفرع أو مستخدم مختلف" }, { status: 409 });
   if (error?.message.includes("duplicate product")) return Response.json({ error: "يوجد صنف مكرر في قائمة الجرد" }, { status: 400 });
   if (error) throw error;
-  const result = typeof data === "object" && data !== null ? data as Record<string, unknown> : {};
-  const takeId = typeof result.stockTakeId === "string" ? result.stockTakeId : "";
+  const rawResult = typeof data === "object" && data !== null ? data as Record<string, unknown> : {};
+  const takeId = typeof rawResult.stockTakeId === "string" ? rawResult.stockTakeId : "";
+  const result = {
+    stockTakeId: takeId,
+    countedItems: typeof rawResult.countedItems === "number" ? rawResult.countedItems : parsed.data.counts.length,
+    adjustedItems: typeof rawResult.adjustedItems === "number" ? rawResult.adjustedItems : 0,
+    replayed: rawResult.replayed === true,
+  };
   await audit(user!.id, "inventory.stock_take", "stock_take", takeId, {
     branchId: parsed.data.branchId, operationId: parsed.data.operationId,
     countedItems: result.countedItems, adjustedItems: result.adjustedItems, replayed: result.replayed,
