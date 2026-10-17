@@ -43,6 +43,46 @@ export async function GET(request: Request) {
   const requested = params.get("branchId");
   if (requested && requested !== "all" && !allowed.includes(requested)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
   const branchIds: string[] = requested && requested !== "all" ? [requested] : allowed;
+
+  if (params.get("mode") === "days") {
+    if (!requested || requested === "all") return Response.json({ mode: "days", role: "owner", today, branches: branches ?? [], branchId: "" });
+    if (!branchIds.length) return Response.json({ mode: "days", role: "owner", today, branches: branches ?? [], branchId: requested, days: [] });
+    const endDate = today;
+    const startDate = addDays(endDate, -89);
+    const periodFrom = cairoMidnight(startDate).toISOString();
+    const periodTo = cairoMidnight(addDays(endDate, 1)).toISOString();
+    const [daySalesRes, dayExpensesRes, dayShiftsRes, dayAccountsRes] = await Promise.all([
+      admin.from("sales").select("id,created_at,delivery_status").in("branch_id", branchIds).gte("created_at", periodFrom).lt("created_at", periodTo).limit(20000),
+      admin.from("expenses").select("expense_date,amount,status").in("branch_id", branchIds).gte("expense_date", startDate).lte("expense_date", endDate).eq("status", "paid").limit(20000),
+      admin.from("seller_shifts").select("opened_at,closed_at,variance,status").in("branch_id", branchIds).gte("opened_at", periodFrom).lt("opened_at", periodTo).limit(20000),
+      admin.from("cash_accounts").select("id").in("branch_id", branchIds).eq("active", true),
+    ]);
+    if (daySalesRes.error || dayExpensesRes.error || dayShiftsRes.error || dayAccountsRes.error) throw daySalesRes.error ?? dayExpensesRes.error ?? dayShiftsRes.error ?? dayAccountsRes.error;
+    const daySales = daySalesRes.data ?? [];
+    const daySaleIds = daySales.map((s: any) => s.id);
+    const [dayPayments, dayTransactions] = await Promise.all([
+      daySaleIds.length ? fetchAll(admin.from("sale_payments").select("sale_id,amount,created_at").in("sale_id", daySaleIds).gte("created_at", periodFrom).lt("created_at", periodTo)) : [],
+      (dayAccountsRes.data ?? []).length ? fetchAll(admin.from("cash_transactions").select("cash_account_id,direction,amount,transaction_type,created_at").in("cash_account_id", (dayAccountsRes.data ?? []).map((a: any) => a.id)).gte("created_at", periodFrom).lt("created_at", periodTo)) : [],
+    ]);
+    const byDay = new Map<string, { date: string; income: number; expenses: number; variance: number; closedShifts: number; invoices: number }>();
+    const getDay = (dateKey: string) => {
+      let row = byDay.get(dateKey);
+      if (!row) { row = { date: dateKey, income: 0, expenses: 0, variance: 0, closedShifts: 0, invoices: 0 }; byDay.set(dateKey, row); }
+      return row;
+    };
+    for (const s of daySales) if (s.delivery_status !== "cancelled") getDay(new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date(s.created_at))).invoices++;
+    for (const p of dayPayments) getDay(new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date(p.created_at))).income += Number(p.amount);
+    for (const t of dayTransactions) if (t.direction === "in" && t.transaction_type === "sale_payment") getDay(new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date(t.created_at))).income = Math.max(getDay(new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date(t.created_at))).income, 0);
+    for (const e of dayExpensesRes.data ?? []) getDay(e.expense_date).expenses += Number(e.amount);
+    for (const s of dayShiftsRes.data ?? []) {
+      if (s.status === "closed" && s.variance != null) { const key = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date(s.closed_at ?? s.opened_at)); const row = getDay(key); row.variance += Number(s.variance); row.closedShifts++; }
+    }
+    const days = [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date)).map((d) => ({
+      ...d,
+      status: d.closedShifts === 0 ? "pending" : d.variance < -0.005 ? "deficit" : d.variance > 0.005 ? "surplus" : "balanced",
+    }));
+    return Response.json({ mode: "days", role: "owner", today, branches: branches ?? [], branchId: requested, days });
+  }
   if (!branchIds.length) return Response.json({ role: isOwner ? "owner" : "seller", date, today, branches: branches ?? [], branchId: requested ?? "all", summary: { invoices: 0, sales: 0, collected: 0, due: 0, expenses: 0, cashIn: 0, cashOut: 0 }, invoices: [], accounts: [], expenses: [], shifts: [], weekHours: [], weekStart: weekStartDate });
 
   // Invoices of the day (sellers only see their own).

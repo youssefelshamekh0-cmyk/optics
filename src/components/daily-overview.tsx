@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { clock, hoursLabel } from "@/components/shift-panel";
 
 type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; due: number; status: string; created_at: string };
+type DayRow = { date: string; income: number; expenses: number; variance: number; closedShifts: number; invoices: number; status: "deficit" | "surplus" | "balanced" | "pending" };
+type DaysList = { today: string; branches: { id: string; name: string }[]; branchId: string; days?: DayRow[] };
 type Daily = {
   role: "owner" | "seller"; date: string; today: string; branches: { id: string; name: string }[]; branchId: string;
   summary: { invoices: number; sales: number; collected: number; due: number; expenses: number; cashIn: number; cashOut: number };
@@ -25,7 +27,7 @@ export default function DailyOverview() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [showAccounts, setShowAccounts] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);\n  const [viewMode, setViewMode] = useState<"list" | "detail">("list");\n  const [daysList, setDaysList] = useState<DaysList | null>(null);\n  const [listLoading, setListLoading] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -37,9 +39,23 @@ export default function DailyOverview() {
       setData(j); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل اليومية"); } finally { setLoading(false); }
   }, [branchId, date]);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { const reload = () => void load(true); window.addEventListener("shift-changed", reload); const id = setInterval(() => { setNow(Date.now()); if (!date || date === data?.today) reload(); }, 60000); return () => { window.removeEventListener("shift-changed", reload); clearInterval(id); }; }, [load, date, data?.today]);
+  const loadDays = useCallback(async () => {\n    setListLoading(true);\n    try { const qs = new URLSearchParams({ mode: "days" }); if (branchId !== "all") qs.set("branchId", branchId); const r = await fetch(`/api/daily?${qs}`, { cache: "no-store" }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? "تعذر تحميل قائمة اليوميات"); setDaysList(j); if (branchId === "all" && j.branches?.length) setBranchId(j.branches[0].id); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل قائمة اليوميات"); } finally { setListLoading(false); }\n  }, [branchId]);\n  useEffect(() => { if (viewMode === "list") void loadDays(); else void load(); }, [viewMode, load, loadDays]);
+  useEffect(() => { const reload = () => { if (viewMode === "list") void loadDays(); else void load(true); }; window.addEventListener("shift-changed", reload); const id = setInterval(() => { setNow(Date.now()); if (!date || date === data?.today) reload(); }, 60000); return () => { window.removeEventListener("shift-changed", reload); clearInterval(id); }; }, [load, loadDays, viewMode, date, data?.today]);
 
+  if (viewMode === "list") {
+    if (!daysList) return <section className="panel"><p className="footnote">{listLoading ? "جارٍ تحميل قائمة اليوميات…" : "لا توجد بيانات لعرضها."}</p>{error && <p className="notice error">{error}</p>}</section>;
+    const statusText: Record<DayRow["status"], string> = { deficit: "عجز", surplus: "زيادة", balanced: "مظبوط", pending: "لم تُغلق الوردية" };
+    const dateText = (d: string) => new Intl.DateTimeFormat("ar-EG", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(d + "T12:00:00Z"));
+    return <section className="panel daily-panel">
+      <div className="section-heading"><div><p className="eyebrow">متابعة الفروع</p><h2>اليوميات</h2></div>
+        <div className="daily-controls"><label>الفرع<select value={branchId} onChange={e=>setBranchId(e.target.value)}>{daysList.branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label><button type="button" className="row-action" onClick={()=>void loadDays()} disabled={listLoading}>{listLoading?"…":"تحديث"}</button></div></div>
+      {error && <p className="notice error" role="alert">{error}</p>}
+      <div className="table-wrap"><table><thead><tr><th>اليوم</th><th>الحالة</th><th>إجمالي الدخل</th><th>إجمالي المصروفات</th><th>الفواتير</th><th>عرض</th></tr></thead><tbody>
+      {(daysList.days ?? []).map(d=><tr key={d.date}><td><strong>{dateText(d.date)}</strong></td><td><span className={d.status==="deficit"?"due":d.status==="surplus"?"status active":d.status==="balanced"?"status":"footnote"}>{statusText[d.status]}</span>{d.closedShifts>0&&<small>فرق الوردية: {money(d.variance)}</small>}</td><td>{money(d.income)}</td><td>{money(d.expenses)}</td><td>{d.invoices}</td><td><button type="button" className="row-action" onClick={()=>{setDate(d.date);setViewMode("detail")}}>عرض اليوم</button></td></tr>)}
+      {(!daysList.days || daysList.days.length===0)&&<tr><td colSpan={6} className="table-empty">لا توجد يوميات لهذا الفرع خلال آخر 90 يومًا.</td></tr>}
+      </tbody></table></div>
+    </section>;
+  }
   if (error && !data) return <section className="panel"><p className="notice error">{error}</p></section>;
   if (!data) return <section className="panel"><p className="footnote">جارٍ تحميل اليومية…</p></section>;
 
@@ -50,9 +66,9 @@ export default function DailyOverview() {
 
   return (
     <section className="panel daily-panel">
-      <div className="section-heading"><div><p className="eyebrow">{isToday ? "اليومية · اليوم" : "اليومية"}</p><h2>{dayLabel}</h2></div>
+      <div className="section-heading"><div><p className="eyebrow">{isToday ? "اليومية · اليوم" : "اليومية"}</p><h2>{dayLabel}</h2></div><button type="button" className="row-action" onClick={()=>setViewMode("list")}>قائمة اليوميات</button>
         <div className="daily-controls">
-          <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="all">{owner ? "كل الفروع" : "كل فروعي"}</option>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          <label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <div className="daily-date"><button type="button" className="row-action" aria-label="اليوم السابق" onClick={() => setDate(shiftDate(data.date, -1))}>›</button>
             <input type="date" aria-label="اختر يومًا" value={data.date} max={data.today} onChange={(e) => e.target.value && setDate(e.target.value)} />
             <button type="button" className="row-action" aria-label="اليوم التالي" disabled={isToday} onClick={() => setDate(shiftDate(data.date, 1) >= data.today ? "" : shiftDate(data.date, 1))}>‹</button>
