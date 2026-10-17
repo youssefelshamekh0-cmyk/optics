@@ -23,7 +23,6 @@ const saleTypeLabels: Record<string, string> = { medical_glasses: "نظارة ط
 const statusLabels: Record<Sale["delivery_status"], string> = { pending: "جديد", processing: "قيد التجهيز", ready: "جاهز", delivered: "تم التسليم", cancelled: "ملغي" };
 const methodLabels: Record<string, string> = { cash: "نقدي", card: "بطاقة", instapay: "إنستاباي", other: "أخرى" };
 
-import { cachedRequestJson } from "@/lib/offline-sync";
 
 async function requestJson(url: string, init?: RequestInit) {
   return cachedRequestJson<any>(url, init);
