@@ -39,6 +39,7 @@ The connected Supabase account currently lists only one project: `optics system`
 - Lock invoice stock rows in product-ID order to reduce deadlocks when concurrent sales include the same products in different orders.
 - Return exact remaining balances and a `payment_balance_error` flag instead of silently clamping overpayment to zero.
 - Add `process_sale_return` migration and `POST /api/sales/[id]/returns` endpoint for partial/full item returns, stock restoration, refund cap, cash ledger, permission check, and audit log.
+- Add a client-supplied UUID idempotency key for return requests; replaying the same key and payload returns the original result, while reusing it with a different payload is rejected.
 - Preserve existing cash transaction types (`payroll_advance` and `central_deposit`) when adding `sale_refund`; this compatibility change is source-only until staging validation.
 - Prorate invoice discounts across returned item quantities so a return uses the effective discounted unit price rather than the reference price.
 
