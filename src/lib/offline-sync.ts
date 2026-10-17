@@ -1,18 +1,20 @@
 "use client";
 
 type CachedEntry = { key: string; value: unknown; savedAt: number };
-export type OfflineSaleOperation = {
+export type OfflineQueueOperation = {
   id: string;
   actorId: string;
-  type: "sale.create";
-  url: "/api/sales";
-  payload: Record<string, unknown> & { operationId: string; branchId: string };
+  type: "sale.create" | "customer.create";
+  url: "/api/sales" | "/api/customers";
+  payload: Record<string, unknown> & { operationId: string };
+  localCustomerId?: string;
   status: "pending" | "syncing" | "conflict" | "rejected" | "synced";
   createdAt: number;
   updatedAt: number;
   message?: string;
-  result?: { saleId?: string; invoiceNumber?: number };
+  result?: { saleId?: string; invoiceNumber?: number; customerId?: string };
 };
+export type OfflineSaleOperation = OfflineQueueOperation;
 export type OfflineSummary = { pending: number; conflicts: number; rejected: number; synced: number; online: boolean };
 
 const DB_NAME = "nazra-offline-v1";
@@ -106,18 +108,18 @@ async function cacheJson(key: string, value: unknown) {
   catch { /* Cache failures must not fail an online request. */ }
 }
 
-async function getOutbox(): Promise<OfflineSaleOperation[]> {
-  try { return await run<OfflineSaleOperation[]>(OUTBOX_STORE, "readonly", store => store.getAll()); }
+async function getOutbox(): Promise<OfflineQueueOperation[]> {
+  try { return await run<OfflineQueueOperation[]>(OUTBOX_STORE, "readonly", store => store.getAll()); }
   catch { return []; }
 }
 
-async function getActorOutbox(): Promise<OfflineSaleOperation[]> {
+async function getActorOutbox(): Promise<OfflineQueueOperation[]> {
   const actorId = storedActorId();
   if (!actorId) return [];
-  return (await getOutbox()).filter(operation => operation.actorId === actorId);
+  return (await getOutbox()).filter(operation => operation.actorId === actorId).sort((a,b) => a.createdAt-b.createdAt);
 }
 
-async function putOperation(operation: OfflineSaleOperation) {
+async function putOperation(operation: OfflineQueueOperation) {
   await run(OUTBOX_STORE, "readwrite", store => store.put(operation));
 }
 
@@ -125,7 +127,7 @@ function notify() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("nazra:sync-state"));
 }
 
-export async function offlineOperations(): Promise<OfflineSaleOperation[]> { return getActorOutbox(); }
+export async function offlineOperations(): Promise<OfflineQueueOperation[]> { return getActorOutbox(); }
 
 export async function offlineSummary(): Promise<OfflineSummary> {
   const operations = await getActorOutbox();
@@ -141,10 +143,10 @@ export async function offlineSummary(): Promise<OfflineSummary> {
 export async function cachedRequestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const parsedUrl = new URL(url, window.location.origin);
-  if ((method === "GET" && canCache(parsedUrl)) || (method === "POST" && parsedUrl.pathname === "/api/sales")) await refreshOfflineActor();
+  if ((method === "GET" && canCache(parsedUrl)) || (method === "POST" && ["/api/sales", "/api/customers"].includes(parsedUrl.pathname))) await refreshOfflineActor();
   const cacheable = method === "GET" && canCache(parsedUrl);
 
-  if (method === "POST" && parsedUrl.pathname === "/api/sales") {
+  if (method === "POST" && parsedUrl.pathname === "/api/customers") {\n    const raw = typeof init?.body === "string" ? init.body : "{}";\n    const payload = JSON.parse(raw) as Record<string, unknown>;\n    const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();\n    const safePayload = { ...payload, operationId };\n    const actorId = storedActorId();\n    if (!actorId) throw new Error("لا يمكن حفظ العميل دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");\n    try {\n      const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, body: JSON.stringify(safePayload) });\n      const data = await response.json().catch(() => ({}));\n      if (!response.ok) throw Object.assign(new Error(data.error ?? "تعذر حفظ العميل"), { status: response.status });\n      return data as T;\n    } catch (error) {\n      const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : 0;\n      if (status) throw error;\n      const localCustomerId = crypto.randomUUID();\n      const now = Date.now();\n      await putOperation({ id: operationId, actorId, type: "customer.create", url: "/api/customers", payload: safePayload, localCustomerId, status: "pending", createdAt: now, updatedAt: now, message: "عميل محفوظ محليًا؛ سيُنشأ على الخادم قبل مزامنة فواتيره." });\n      notify();\n      return { queued: true, operationId, customer: { id: localCustomerId, full_name: String(payload.name ?? ""), phone: String(payload.phone ?? ""), email: String(payload.email ?? ""), notes: String(payload.notes ?? "") } } as T;\n    }\n  }\n\n  if (method === "POST" && parsedUrl.pathname === "/api/sales") {
     const raw = typeof init?.body === "string" ? init.body : "{}";
     const payload = JSON.parse(raw) as Record<string, unknown>;
     const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
@@ -164,7 +166,7 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
       const now = Date.now();
       await putOperation({
         id: operationId, actorId, type: "sale.create", url: "/api/sales",
-        payload: safePayload as OfflineSaleOperation["payload"], status: "pending",
+        payload: safePayload, status: "pending",
         createdAt: now, updatedAt: now,
       });
       notify();
@@ -187,7 +189,7 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
   }
 }
 
-export async function syncPendingSales(): Promise<void> {
+export async function syncPendingOperations(): Promise<void> {
   if (syncing || typeof navigator === "undefined" || !navigator.onLine || !storedActorId()) return;
   syncing = true;
   try {
@@ -238,7 +240,7 @@ export async function retryOfflineOperation(id: string): Promise<void> {
   if (!operation || (operation.status !== "conflict" && operation.status !== "rejected")) return;
   await putOperation({ ...operation, status: "pending", message: undefined, updatedAt: Date.now() });
   notify();
-  await syncPendingSales();
+  await syncPendingOperations();
 }
 
 export async function clearSyncedOfflineOperations(): Promise<void> {
@@ -258,10 +260,11 @@ export function registerOfflineSync() {
       if (typeof data.user?.id !== "string") return;
       setOfflineActor(data.user.id);
     } catch { /* Do not send queued operations until an authenticated session is reachable. */ return; }
-    await syncPendingSales();
+    await syncPendingOperations();
   };
   window.addEventListener("online", sync);
   window.addEventListener("focus", sync);
   void sync();
   return () => { window.removeEventListener("online", sync); window.removeEventListener("focus", sync); };
 }
+\nexport const syncPendingSales = syncPendingOperations;\n
