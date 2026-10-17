@@ -37,7 +37,7 @@ export default function DailyOverview({ initialView = "list", }: { initialView?:
       const r = await fetch(`/api/daily?${qs}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تحميل اليومية");
-      setData(j); setError("");
+      setData(j); if (!branchId && j.branches?.length) setBranchId(j.branches[0].id); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل اليومية"); } finally { setLoading(false); }
   }, [branchId, date]);
   useEffect(() => { void load(); }, [load]);
@@ -74,7 +74,7 @@ export default function DailyOverview({ initialView = "list", }: { initialView?:
     <section className="panel daily-panel">
       <div className="section-heading"><div><p className="eyebrow">{isToday ? "اليومية · اليوم" : "اليومية"}</p><h2>{dayLabel}</h2></div>
         <div className="daily-controls">
-          <button type="button" className="row-action" onClick={() => setView("list")}>قائمة اليوميات</button><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="all">كل الفروع</option>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          <button type="button" className="row-action" onClick={() => setView("list")}>قائمة اليوميات</button><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <div className="daily-date"><button type="button" className="row-action" aria-label="اليوم السابق" onClick={() => setDate(shiftDate(data.date, -1))}>›</button>
             <input type="date" aria-label="اختر يومًا" value={data.date} max={data.today} onChange={(e) => e.target.value && setDate(e.target.value)} />
             <button type="button" className="row-action" aria-label="اليوم التالي" disabled={isToday} onClick={() => setDate(shiftDate(data.date, 1) >= data.today ? "" : shiftDate(data.date, 1))}>‹</button>
