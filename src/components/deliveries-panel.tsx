@@ -5,7 +5,7 @@ type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INAC
 type Item = { item_name: string; quantity: number; unit_price: number; line_total: number };
 type CashAccount = { id: string; branch_id: string; name: string; payment_method: string };
 type Sale = {
-  id: string; invoice_number: number; branch_id: string; delivery_status: "pending" | "processing" | "ready" | "delivered"; grand_total: number; paid_amount: number; due_amount: number; notes: string | null; created_at: string;
+  id: string; invoice_number: number; branch_id: string; total_amount: number; discount_amount: number; delivery_status: "pending" | "processing" | "ready" | "delivered"; grand_total: number; paid_amount: number; due_amount: number; notes: string | null; created_at: string;
   customers: { full_name: string; phone: string } | null; branches: { name: string } | null; sale_items?: Item[];
 };
 const STATUSES = ["pending", "processing", "ready", "delivered"] as const;
@@ -53,6 +53,8 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   const [sales, setSales] = useState<Sale[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, string>>({});
+  const [deliveryDialogSaleId, setDeliveryDialogSaleId] = useState<string | null>(null);
+  const [discountDraft, setDiscountDraft] = useState("0");
   const [status, setStatus] = useState<"all" | (typeof STATUSES)[number]>("all");
   const [payment, setPayment] = useState<"all" | "due" | "paid">("all");
   const [search, setSearch] = useState("");
@@ -72,11 +74,12 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   async function deliverAndCollect(saleId: string) {
     setBusy(true); setError(""); setNotice("");
     try {
-      const r = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deliverAndCollect", saleId, cashAccountId: selectedAccounts[saleId] ?? "" }) });
+      const r = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "deliverAndCollect", saleId, cashAccountId: selectedAccounts[saleId] ?? "", discountAmount: Number(discountDraft || 0) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تسليم الفاتورة وتسجيل المتبقي");
       setSelectedAccounts((current) => { const next = { ...current }; delete next[saleId]; return next; });
-      setNotice("تم تسليم الفاتورة وتسجيل المتبقي في حساب الخزنة المختار"); await load();
+      setDeliveryDialogSaleId(null); setDiscountDraft("0");
+      setNotice("تم تسليم الفاتورة وتسجيل الخصم والتحصيل في حساب الخزنة المختار"); await load();
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسليم الفاتورة"); } finally { setBusy(false); }
   }
 
@@ -115,10 +118,11 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
         {rows.map((s) => <tr key={s.id}><td>#{s.invoice_number}<small>{dateOf(s.created_at)}</small></td><td>{s.customers?.full_name}<small>{s.customers?.phone}</small></td><td>{s.branches?.name}</td><td>{money(Number(s.grand_total))}</td><td>{s.due_amount > 0 ? <strong className="due">{money(s.due_amount)}</strong> : "—"}</td>
           <td><span className={`status-pill s-${s.delivery_status}`}>{statusLabel[s.delivery_status]}</span></td>
           <td><select className="status-select" aria-label={`حالة الفاتورة ${s.invoice_number}`} value={s.delivery_status} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => void updateStatus(s.id, e.target.value)}>{STATUSES.map((x) => <option value={x} key={x}>{statusLabel[x]}</option>)}</select></td>
-          <td>{s.due_amount > 0 ? <select className="status-select" aria-label={`حساب خزنة تحصيل الفاتورة ${s.invoice_number}`} value={selectedAccounts[s.id] ?? ""} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => setSelectedAccounts((current) => ({ ...current, [s.id]: e.target.value }))}><option value="">اختر حساب الخزنة</option>{cashAccounts.filter((account) => account.branch_id === s.branch_id).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select> : "لا يوجد متبقي"}</td><td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered" || (s.due_amount > 0 && !selectedAccounts[s.id])} onClick={() => void deliverAndCollect(s.id)}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
+          <td>{s.due_amount > 0 ? <select className="status-select" aria-label={`حساب خزنة تحصيل الفاتورة ${s.invoice_number}`} value={selectedAccounts[s.id] ?? ""} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => setSelectedAccounts((current) => ({ ...current, [s.id]: e.target.value }))}><option value="">اختر حساب الخزنة</option>{cashAccounts.filter((account) => account.branch_id === s.branch_id).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select> : "لا يوجد متبقي"}</td><td><button type="button" className="row-action" disabled={busy || s.delivery_status === "delivered" || (s.due_amount > 0 && !selectedAccounts[s.id])} onClick={() => { setDeliveryDialogSaleId(s.id); setDiscountDraft("0"); }}>تسليم</button></td><td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
         {rows.length === 0 && <tr><td colSpan={10} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
       </tbody></table></div>
       <p className="footnote">كل تغيير حالة يُحفظ في سجل تسليم الفاتورة. القائمة تعرض آخر 200 فاتورة غير ملغاة.</p>
+      {modal}
     </section>
   );
 }
