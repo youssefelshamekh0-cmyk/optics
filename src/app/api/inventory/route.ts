@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   const admin = getSupabaseAdmin();
   const [products, branchProducts] = await Promise.all([
     admin.from("products").select("id,sku,name,category,brand,model,color,size,active,created_at").eq("active", true).order("name"),
-    admin.from("branch_products").select("product_id,cost_price,reference_price,quantity,updated_at").eq("branch_id", branchId),
+    admin.from("branch_products").select("product_id,cost_price,reference_price,quantity,low_stock_threshold,updated_at").eq("branch_id", branchId),
   ]);
   if (products.error || branchProducts.error) throw products.error ?? branchProducts.error;
   const stock = new Map((branchProducts.data ?? []).map((row) => [row.product_id, row]));
@@ -53,4 +53,27 @@ export async function POST(request: Request) {
   if (error) throw error;
   await audit(user!.id, "product.create", "product", data, { branchId: input.branchId, category: input.category });
   return Response.json({ productId: data }, { status: 201 });
+}
+
+export async function PATCH(request: Request) {
+  const { user, response } = await ownerOnly();
+  if (response) return response;
+  if (!(await requireSameOrigin(request))) return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
+  const schema = z.object({
+    branchId: z.string().uuid(), productId: z.string().uuid(),
+    lowStockThreshold: z.number().int().min(0).max(100000),
+  });
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: "حدد حد التنبيه بقيمة صحيحة" }, { status: 400 });
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin.from("branch_products")
+    .update({ low_stock_threshold: parsed.data.lowStockThreshold, updated_at: new Date().toISOString() })
+    .eq("branch_id", parsed.data.branchId).eq("product_id", parsed.data.productId)
+    .select("branch_id,product_id,quantity,low_stock_threshold").maybeSingle();
+  if (error) throw error;
+  if (!data) return Response.json({ error: "الصنف غير موجود في مخزون الفرع" }, { status: 404 });
+  await audit(user!.id, "inventory.low_stock_threshold", "branch_product", parsed.data.productId, {
+    branchId: parsed.data.branchId, lowStockThreshold: parsed.data.lowStockThreshold,
+  });
+  return Response.json({ stock: data });
 }
