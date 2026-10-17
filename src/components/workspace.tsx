@@ -80,7 +80,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الدخول"); }
     finally { setBusy(false); }
   }
-  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; clearOfflineActor(); setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
+  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_SHELL" }); clearOfflineActor(); setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
   async function createBranch(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
