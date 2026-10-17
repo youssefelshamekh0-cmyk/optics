@@ -3,6 +3,7 @@
 type CachedEntry = { key: string; value: unknown; savedAt: number };
 export type OfflineSaleOperation = {
   id: string;
+  actorId: string;
   type: "sale.create";
   url: "/api/sales";
   payload: Record<string, unknown> & { operationId: string; branchId: string };
@@ -21,6 +22,20 @@ const OUTBOX_STORE = "sales-outbox";
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 let opening: Promise<IDBDatabase> | null = null;
 let syncing = false;
+let activeActorId: string | null = null;
+
+function storedActorId(): string | null {
+  if (activeActorId) return activeActorId;
+  try { return window.localStorage.getItem("nazra-offline-actor"); } catch { return null; }
+}
+
+export function setOfflineActor(actorId: string) {
+  const next = actorId.trim();
+  if (!next) return;
+  activeActorId = next;
+  try { window.localStorage.setItem("nazra-offline-actor", next); } catch { /* Local storage may be disabled. */ }
+  notify();
+}
 
 function database(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") return Promise.reject(new Error("التخزين المحلي غير متاح على هذا الجهاز"));
@@ -57,21 +72,32 @@ const canCache = (url: URL) => url.origin === window.location.origin && (
 );
 
 export async function getCachedJson<T>(key: string): Promise<T | null> {
+  const actorId = storedActorId();
+  if (!actorId) return null;
   try {
-    const entry = await run<CachedEntry | undefined>(CACHE_STORE, "readonly", store => store.get(key));
+    const entry = await run<CachedEntry | undefined>(CACHE_STORE, "readonly", store => store.get(actorId + ":" + key));
     if (!entry || Date.now() - entry.savedAt > CACHE_TTL_MS) return null;
     return entry.value as T;
   } catch { return null; }
 }
 
 async function cacheJson(key: string, value: unknown) {
-  try { await run(CACHE_STORE, "readwrite", store => store.put({ key, value, savedAt: Date.now() } satisfies CachedEntry)); }
+  const actorId = storedActorId();
+  if (!actorId) return;
+  const scopedKey = actorId + ":" + key;
+  try { await run(CACHE_STORE, "readwrite", store => store.put({ key: scopedKey, value, savedAt: Date.now() } satisfies CachedEntry)); }
   catch { /* Cache failures must not fail an online request. */ }
 }
 
 async function getOutbox(): Promise<OfflineSaleOperation[]> {
   try { return await run<OfflineSaleOperation[]>(OUTBOX_STORE, "readonly", store => store.getAll()); }
   catch { return []; }
+}
+
+async function getActorOutbox(): Promise<OfflineSaleOperation[]> {
+  const actorId = storedActorId();
+  if (!actorId) return [];
+  return (await getOutbox()).filter(operation => operation.actorId === actorId);
 }
 
 async function putOperation(operation: OfflineSaleOperation) {
@@ -82,10 +108,10 @@ function notify() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("nazra:sync-state"));
 }
 
-export async function offlineOperations(): Promise<OfflineSaleOperation[]> { return getOutbox(); }
+export async function offlineOperations(): Promise<OfflineSaleOperation[]> { return getActorOutbox(); }
 
 export async function offlineSummary(): Promise<OfflineSummary> {
-  const operations = await getOutbox();
+  const operations = await getActorOutbox();
   return {
     pending: operations.filter(x => x.status === "pending" || x.status === "syncing").length,
     conflicts: operations.filter(x => x.status === "conflict").length,
@@ -105,6 +131,8 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
     const payload = JSON.parse(raw) as Record<string, unknown>;
     const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
     const safePayload = { ...payload, operationId };
+    const actorId = storedActorId();
+    if (!actorId) throw new Error("لا يمكن حفظ فاتورة دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");
     const requestInit = { ...init, headers: { "content-type": "application/json", ...init?.headers }, body: JSON.stringify(safePayload) };
     try {
       const response = await fetch(url, requestInit);
@@ -117,7 +145,7 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
       if (!safePayload.branchId || !safePayload.customerId) throw new Error("لا يمكن حفظ الفاتورة دون فرع وعميل محددين");
       const now = Date.now();
       await putOperation({
-        id: operationId, type: "sale.create", url: "/api/sales",
+        id: operationId, actorId, type: "sale.create", url: "/api/sales",
         payload: safePayload as OfflineSaleOperation["payload"], status: "pending",
         createdAt: now, updatedAt: now,
       });
@@ -142,10 +170,10 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
 }
 
 export async function syncPendingSales(): Promise<void> {
-  if (syncing || typeof navigator === "undefined" || !navigator.onLine) return;
+  if (syncing || typeof navigator === "undefined" || !navigator.onLine || !storedActorId()) return;
   syncing = true;
   try {
-    const operations = (await getOutbox()).filter(operation => operation.status === "pending");
+    const operations = (await getActorOutbox()).filter(operation => operation.status === "pending");
     for (const operation of operations) {
       const started = { ...operation, status: "syncing" as const, updatedAt: Date.now() };
       await putOperation(started);
@@ -188,7 +216,7 @@ export async function syncPendingSales(): Promise<void> {
 }
 
 export async function retryOfflineOperation(id: string): Promise<void> {
-  const operation = (await getOutbox()).find(item => item.id === id);
+  const operation = (await getActorOutbox()).find(item => item.id === id);
   if (!operation || (operation.status !== "conflict" && operation.status !== "rejected")) return;
   await putOperation({ ...operation, status: "pending", message: undefined, updatedAt: Date.now() });
   notify();
@@ -196,7 +224,7 @@ export async function retryOfflineOperation(id: string): Promise<void> {
 }
 
 export async function clearSyncedOfflineOperations(): Promise<void> {
-  const operations = await getOutbox();
+  const operations = await getActorOutbox();
   await Promise.all(operations.filter(x => x.status === "synced").map(x => run(OUTBOX_STORE, "readwrite", store => store.delete(x.id))));
   notify();
 }
