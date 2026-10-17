@@ -104,7 +104,7 @@ type Supply = { id: string; invoice_number: string; received_at: string; total_c
 type RegisteredLens = { id: string; name: string; category: string; company: string };
 type SupplyLine = { key: string; productId?: string; newName?: string; category?: string; name: string; quantity: string; unitCost: string };
 const localInput = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+function ManualLensSupply({ branches }: { branches: Branch[] }) {
   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
   const [branchId, setBranchId] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
@@ -205,4 +205,87 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
     </form>
     <div className="table-wrap"><table><thead><tr><th>فاتورة المورد</th><th>المورد</th><th>تاريخ الاستلام</th><th>الأصناف</th><th>الإجمالي</th></tr></thead><tbody>{supplies.map((s) => <tr key={s.id}><td>{s.invoice_number}</td><td>{s.supplier?.name ?? "—"}</td><td>{new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(s.received_at))}</td><td>{s.items.map((i) => `${i.product?.name ?? "صنف"} × ${i.quantity} (${money(Number(i.unit_cost))})`).join("، ")}</td><td>{money(Number(s.total_cost))}</td></tr>)}{supplies.length === 0 && <tr><td colSpan={5} className="table-empty">لا توجد توريدات مسجلة لهذا الفرع.</td></tr>}</tbody></table></div>
   </section>;
+}
+
+
+type OrderedLens = { id: string; invoiceNumber: number; orderedAt: string; deliveryStatus: string; customer: string; phone: string; company: string; lensTypeName: string; options: string; right: { sphere: number; cylinder: number; axis: string } | null; left: { sphere: number; cylinder: number; axis: string } | null };
+const rxText = (e: OrderedLens["right"]) => (e ? `${e.sphere} / ${e.cylinder}${e.axis ? ` × ${e.axis}` : ""}` : "—");
+
+/** Pick a lens company, see the lenses customers ordered from it, tick the ones that arrived and complete the supplier invoice. */
+function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
+  const activeBranches = branches.filter((b) => b.status === "ACTIVE");
+  const [branchId, setBranchId] = useState("");
+  const [companies, setCompanies] = useState<{ name: string; pending: number }[]>([]);
+  const [company, setCompany] = useState("");
+  const [orders, setOrders] = useState<OrderedLens[]>([]);
+  const [pickedIds, setPickedIds] = useState<string[]>([]);
+  const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput(), totalAmount: "" });
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+  useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
+
+  const load = useCallback(async (selected: string) => {
+    if (!branchId) return;
+    try {
+      const result = await requestJson(`/api/lens-supplies/orders?branchId=${branchId}&company=${encodeURIComponent(selected)}`);
+      setCompanies(result.companies ?? []); setOrders(result.orders ?? []);
+      setPickedIds((current) => current.filter((id) => (result.orders ?? []).some((o: OrderedLens) => o.id === id)));
+      setError("");
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الطلبات"); }
+  }, [branchId]);
+  useEffect(() => { void load(company); }, [load, company]);
+
+  const picked = pickedIds;
+  const total = Number(form.totalAmount) || 0;
+  function toggle(id: string) { setPickedIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id])); }
+  function pickCompany(name: string) { setCompany(name); setPickedIds([]); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
+  function selectAll() { setPickedIds(orders.map((o) => o.id)); }
+
+  async function save(event: FormEvent) {
+    event.preventDefault(); setError(""); setNotice("");
+    if (!picked.length) { setError("حدد العدسات التي وصلت أولاً"); return; }
+    if (form.totalAmount === "" || Number(form.totalAmount) < 0) { setError("اكتب إجمالي مبلغ فاتورة المورد"); return; }
+    setBusy(true);
+    try {
+      await requestJson("/api/lens-supplies/orders", { method: "POST", body: JSON.stringify({ ...form, receivedAt: new Date(form.receivedAt).toISOString(), branchId, company, totalAmount: Number(form.totalAmount), saleItemIds: picked }) });
+      setNotice(`تم تسجيل فاتورة التوريد وتعليم ${picked.length} عدسة كمستلمة`); setPickedIds([]); setForm((f) => ({ ...f, invoiceNumber: "", totalAmount: "", receivedAt: localInput() })); await load(company);
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل التوريد"); await load(company); } finally { setBusy(false); }
+  }
+
+  return <>
+    <div className="catalog-toolbar"><label>الفرع المستلم<select value={branchId} onChange={(e) => { setBranchId(e.target.value); setCompany(""); setPickedIds([]); setOrders([]); }}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+      <label>الشركة<select value={company} onChange={(e) => pickCompany(e.target.value)}><option value="">اختر الشركة…</option>{companies.map((c) => <option key={c.name} value={c.name}>{c.name} — {c.pending} مطلوبة</option>)}</select></label></div>
+    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
+    {companies.length === 0 && !error && <p className="footnote">لا توجد عدسات مطلوبة من العملاء بانتظار الاستلام في هذا الفرع.</p>}
+    {company && <form className="catalog-form" onSubmit={save}>
+      <div className="sale-subheading"><strong>العدسات المطلوبة من {company} ({orders.length})</strong><span className="footnote">علّم العدسات التي وصلت فقط، وسيبقى الباقي مطلوبًا.</span></div>
+      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button></div>
+      <div className="order-lens-list">{orders.map((o) => { const on = picked.includes(o.id); return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
+        <input type="checkbox" aria-label={`وصلت عدسة فاتورة ${o.invoiceNumber}`} checked={on} onChange={() => toggle(o.id)} />
+        <label><strong>{o.lensTypeName}{o.options ? ` — ${o.options}` : ""}</strong><small>فاتورة #{o.invoiceNumber} · {o.customer}{o.phone ? ` · ${o.phone}` : ""} · {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(o.orderedAt))}</small><small>يمين: {rxText(o.right)} · يسار: {rxText(o.left)}</small></label>
+</div>; })}
+        {orders.length === 0 && <span className="footnote">لا توجد عدسات مطلوبة من هذه الشركة.</span>}</div>
+      {picked.length > 0 && <>
+        <div className="catalog-fields">
+          <label>المورد<input required minLength={2} value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
+          <label>رقم هاتف المورد<input type="tel" value={form.supplierPhone} onChange={(e) => setForm({ ...form, supplierPhone: e.target.value })} /></label>
+          <label>رقم فاتورة المورد<input required value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></label>
+          <label>تاريخ الاستلام<input required type="datetime-local" value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} /></label>
+          <label>إجمالي مبلغ الفاتورة<input required type="number" min="0" step="0.01" inputMode="decimal" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} placeholder="المبلغ الكامل كما في فاتورة المورد" /></label>
+        </div>
+        <p><strong>{picked.length} عدسة وصلت — إجمالي الفاتورة: {money(total)}</strong></p>
+        <button className="primary" disabled={busy}>{busy ? "جارٍ التسجيل…" : "إتمام فاتورة التوريد"}</button>
+        <p className="footnote">العدسات المطلوبة لعملاء محددين لا تدخل مخزون الفرع؛ تُسجَّل فقط في فاتورة المورد وتُعلَّم كمستلمة.</p></>}
+    </form>}
+  </>;
+}
+
+export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
+  const [mode, setMode] = useState<"orders" | "stock">("orders");
+  return <>
+    <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">استلام العدسات من الشركات</p><h2>توريد العدسات</h2></div></div>
+      <div className="mode-switch" role="tablist"><button type="button" role="tab" aria-selected={mode === "orders"} className={mode === "orders" ? "on" : ""} onClick={() => setMode("orders")}>طلبات العملاء من الشركة</button><button type="button" role="tab" aria-selected={mode === "stock"} className={mode === "stock" ? "on" : ""} onClick={() => setMode("stock")}>توريد مخزون يدوي</button></div>
+      {mode === "orders" && <OrderedLensReceiving branches={branches} />}
+    </section>
+    {mode === "stock" && <ManualLensSupply branches={branches} />}
+  </>;
 }

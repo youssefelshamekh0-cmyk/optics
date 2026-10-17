@@ -1,0 +1,202 @@
+diff --git a/src/app/api/account/route.ts b/src/app/api/account/route.ts
+index 98f77c5..fec31cb 100644
+--- a/src/app/api/account/route.ts
++++ b/src/app/api/account/route.ts
+@@ -13,8 +13,12 @@ export async function GET() {
+   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
+   const admin = getSupabaseAdmin() as any;
+   const week = currentWeek();
+-  const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate,branches(name)").eq("user_id", user.id).maybeSingle();
++  const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate").eq("user_id", user.id).maybeSingle();
+   if (error) throw error;
++  // A seller can be registered in several branches; hours, sales and commission below count across all of them.
++  const branchRows = user.branchIds.length ? await admin.from("branches").select("name").in("id", user.branchIds).order("name") : { data: [], error: null };
++  if (branchRows.error) throw branchRows.error;
++  const branchNames: string[] = (branchRows.data ?? []).map((b: any) => b.name);
+   const base = { name: user.name, phone: user.phone, isOwner: user.roles.includes("super_admin"), week: { start: week.start, end: week.end } };
+   if (!employee || base.isOwner) return Response.json({ ...base, salary: null });
+ 
+@@ -31,7 +35,7 @@ export async function GET() {
+   return Response.json({
+     ...base,
+     salary: {
+-      jobTitle: employee.job_title, branch: employee.branches?.name ?? null,
++      jobTitle: employee.job_title, branches: branchNames,
+       weeklySalary: Number(employee.base_salary), commissionRate: rate,
+       weekSeconds, weekSales: rate > 0 ? weekSales : 0, weekCommission: Math.round(weekSales * rate) / 100,
+       payroll: (payroll.data ?? []).map((p: any) => ({ ...p, base_salary: Number(p.base_salary), commission_amount: Number(p.commission_amount), deductions: Number(p.deductions), amount_paid: Number(p.amount_paid) })),
+diff --git a/src/app/api/lens-supplies/orders/route.ts b/src/app/api/lens-supplies/orders/route.ts
+index 7a60281..f94ad95 100644
+--- a/src/app/api/lens-supplies/orders/route.ts
++++ b/src/app/api/lens-supplies/orders/route.ts
+@@ -14,7 +14,8 @@ const bodySchema = z.object({
+   branchId: z.string().uuid(), company: z.string().trim().min(1).max(120),
+   invoiceNumber: z.string().trim().min(1).max(100), supplierName: z.string().trim().min(2).max(160),
+   supplierPhone: z.string().trim().max(40).default(""), receivedAt: z.string().datetime(),
+-  items: z.array(z.object({ saleItemId: z.string().uuid(), unitCost: z.number().finite().min(0).max(10000000) })).min(1).max(200),
++  totalAmount: z.number().finite().min(0).max(100000000),
++  saleItemIds: z.array(z.string().uuid()).min(1).max(200),
+ });
+ 
+ /** Ordered (not yet received) prescription lenses of a branch, grouped by lens company. */
+@@ -57,7 +58,7 @@ export async function POST(request: Request) {
+   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+   if (!parsed.success) return Response.json({ error: "راجع بيانات الفاتورة والعدسات المستلمة" }, { status: 400 });
+   const input = parsed.data;
+-  const ids = input.items.map((i) => i.saleItemId);
++  const ids = input.saleItemIds;
+   if (new Set(ids).size !== ids.length) return Response.json({ error: "عدسة مكررة في الفاتورة" }, { status: 400 });
+   const admin = getSupabaseAdmin() as any;
+ 
+@@ -66,7 +67,10 @@ export async function POST(request: Request) {
+   if ((lines ?? []).length !== ids.length) return Response.json({ error: "إحدى العدسات غير موجودة" }, { status: 400 });
+   if ((lines ?? []).some((l: any) => String(l.technical_details?.company ?? "") !== input.company)) return Response.json({ error: "كل العدسات في الفاتورة يجب أن تكون من نفس الشركة" }, { status: 400 });
+ 
+-  const costById = new Map(input.items.map((i) => [i.saleItemId, i.unitCost]));
++  // The owner types the whole supplier invoice amount; it is split evenly per lens in cents (remainder goes to the first lenses).
++  const totalCents = Math.round(input.totalAmount * 100);
++  const baseCents = Math.floor(totalCents / ids.length), extraCents = totalCents - baseCents * ids.length;
++  const costById = new Map(ids.map((id, i) => [id, (baseCents + (i < extraCents ? 1 : 0)) / 100]));
+   // The supply invoice keeps a catalogue product per lens type (created once, reused afterwards).
+   const productByName = new Map<string, string>();
+   const rpcItems: { saleItemId: string; productId: string; unitCost: number }[] = [];
+diff --git a/src/app/api/operations/route.ts b/src/app/api/operations/route.ts
+index 7efaaf0..0958830 100644
+--- a/src/app/api/operations/route.ts
++++ b/src/app/api/operations/route.ts
+@@ -125,7 +125,7 @@ export async function POST(request:Request){
+    if((Date.parse(parsed.data.periodEnd)-Date.parse(parsed.data.periodStart))/86400000>6)return Response.json({error:"كشف الراتب أسبوعي: الفترة يجب ألا تزيد عن 7 أيام"},{status:400});
+    const {data:employee,error:e}=await admin.from("employees").select("id,branch_id,user_id,base_salary,commission_rate").eq("id",parsed.data.employeeId).maybeSingle();if(e)throw e;if(!employee)return Response.json({error:"الموظف غير موجود"},{status:404});if(!branchAllowed(user!,employee.branch_id))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+    const overlap=await admin.from("payroll_entries").select("id").eq("employee_id",employee.id).lte("period_start",parsed.data.periodEnd).gte("period_end",parsed.data.periodStart).limit(1);if(overlap.error)throw overlap.error;if(overlap.data?.length)return Response.json({error:"يوجد كشف راتب لهذا الموظف يتداخل مع نفس الأسبوع"},{status:409});
+-   let commission=0;if(employee.user_id&&Number(employee.commission_rate)>0){const sales=await admin.from("sales").select("grand_total").eq("created_by",employee.user_id).eq("branch_id",employee.branch_id).gte("created_at",parsed.data.periodStart).lte("created_at",parsed.data.periodEnd+"T23:59:59.999Z").neq("delivery_status","cancelled");if(sales.error)throw sales.error;commission=(sales.data??[]).reduce((s:number,x:any)=>s+Number(x.grand_total),0)*Number(employee.commission_rate)/100;}
++   let commission=0;if(employee.user_id&&Number(employee.commission_rate)>0){const access=await admin.from("user_branch_access").select("branch_id").eq("user_id",employee.user_id);if(access.error)throw access.error;const sellerBranches:string[]=[...new Set<string>([employee.branch_id,...(access.data??[]).map((x:any)=>x.branch_id)])];const sales=await admin.from("sales").select("grand_total").eq("created_by",employee.user_id).in("branch_id",sellerBranches).gte("created_at",parsed.data.periodStart).lte("created_at",parsed.data.periodEnd+"T23:59:59.999Z").neq("delivery_status","cancelled");if(sales.error)throw sales.error;commission=(sales.data??[]).reduce((s:number,x:any)=>s+Number(x.grand_total),0)*Number(employee.commission_rate)/100;}
+    const {data,error}=await admin.from("payroll_entries").insert({employee_id:employee.id,period_start:parsed.data.periodStart,period_end:parsed.data.periodEnd,base_salary:employee.base_salary,commission_amount:commission,deductions:parsed.data.deductions,created_by:user!.id,notes:parsed.data.notes||null}).select("id").single();if(error)throw error;entityId=data.id;
+  }else if(action==="payrollPay"){
+    const {data,error}=await admin.rpc("pay_payroll",{p_payroll:parsed.data.payrollId,p_account:parsed.data.cashAccountId,p_amount:parsed.data.amount,p_actor:user!.id});if(error)throw error;entityId=parsed.data.payrollId;
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 93203dc..f05b4c1 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -53,3 +53,7 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
+ .week-shortcuts{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.mode-switch{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}.mode-switch button{border:1px solid var(--line);background:white;border-radius:20px;padding:8px 14px;font-size:11px;color:var(--ink)}.mode-switch button.on{background:var(--green);color:white;border-color:var(--green)}
+ .order-lens-list{display:grid;gap:8px;margin:10px 0 14px}.order-lens{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fbfcfb}.order-lens.on{border-color:var(--green);background:var(--mint)}.order-lens input[type=checkbox]{accent-color:var(--green);width:16px;height:16px}.order-lens small{display:block;color:var(--muted);font-size:10px;margin-top:3px;direction:rtl;text-align:right}.order-lens .cost{width:110px;height:34px;border:1px solid #e2e8e3;border-radius:8px;padding:0 9px;font-size:11px}
+ @media(max-width:560px){.order-lens{grid-template-columns:auto 1fr}.order-lens .cost{grid-column:1/-1;width:100%}}
++
++/* My account: keep everything inside the phone screen */
++.account-grid>*{min-width:0}.account-grid .section-heading{flex-wrap:wrap;gap:8px}.account-grid .count-badge{max-width:100%}.account-grid .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.account-grid table{min-width:480px}.account-grid .form-grid>label,.account-grid .form-grid input{min-width:0;width:100%}
++@media(max-width:560px){.account-grid{gap:12px}.account-grid .form-panel{padding:17px 14px}.account-grid .form-grid{grid-template-columns:1fr}.account-grid .form-grid .wide{grid-column:auto}.account-grid .primary{width:100%}.account-kpis strong{font-size:17px}.workspace-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+diff --git a/src/components/account-section.tsx b/src/components/account-section.tsx
+index dc5c9c1..78d5446 100644
+--- a/src/components/account-section.tsx
++++ b/src/components/account-section.tsx
+@@ -5,7 +5,7 @@ import { hoursLabel } from "@/components/shift-panel";
+ type Payroll = { id: string; period_start: string; period_end: string; base_salary: number; commission_amount: number; deductions: number; amount_paid: number; status: string };
+ type Account = {
+   name: string; phone: string; isOwner: boolean; week: { start: string; end: string };
+-  salary: null | { jobTitle: string; branch: string | null; weeklySalary: number; commissionRate: number; weekSeconds: number; weekSales: number; weekCommission: number; payroll: Payroll[] };
++  salary: null | { jobTitle: string; branches: string[]; weeklySalary: number; commissionRate: number; weekSeconds: number; weekSales: number; weekCommission: number; payroll: Payroll[] };
+ };
+ const money = (n: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(n);
+ const dayText = (d: string) => new Intl.DateTimeFormat("ar-EG", { day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
+@@ -50,7 +50,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
+         {error && <div className="wide notice error" role="alert">{error}</div>}{notice && <div className="wide notice success" role="status">{notice}</div>}
+         <button className="primary" disabled={busy}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
+       </form></section>
+-    {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2></div>{s && <span className="count-badge">{s.jobTitle}{s.branch ? ` · ${s.branch}` : ""}</span>}</div>
++    {!isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">{data ? `أسبوع ${dayText(data.week.start)} – ${dayText(data.week.end)}` : "الأسبوع الحالي"}</p><h2>مرتبي</h2>{s && s.branches.length > 0 && <p className="footnote">الفروع: {s.branches.join("، ")}</p>}</div>{s && <span className="count-badge">{s.jobTitle}</span>}</div>
+       {!data ? <p className="footnote">جارٍ التحميل…</p> : !s ? <p className="footnote">لم يُسجَّل لك مرتب بعد. اطلب من المالك ربط حسابك بسجل موظف.</p> : <>
+         <div className="account-kpis">
+           <article><span>المرتب الأسبوعي</span><strong>{money(s.weeklySalary)}</strong><small>يُصرف كل أسبوع</small></article>
+@@ -62,7 +62,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
+           {s.payroll.map((p) => <tr key={p.id}><td>{dayText(p.period_start)} – {dayText(p.period_end)}</td><td>{money(p.base_salary)}</td><td>{money(p.commission_amount)}</td><td>{money(p.deductions)}</td><td>{money(p.amount_paid)}</td><td>{p.status === "pending" ? "قيد الصرف" : "تم الصرف"}</td></tr>)}
+           {s.payroll.length === 0 && <tr><td colSpan={6} className="table-empty">لا توجد كشوف رواتب بعد.</td></tr>}
+         </tbody></table></div>
+-        <p className="footnote">العمولة المعروضة تقديرية حتى يُعتمد كشف الأسبوع من المالك.</p></>}
++        <p className="footnote">الساعات والعمولة محسوبة على كل فروعك معًا. العمولة المعروضة تقديرية حتى يُعتمد كشف الأسبوع من المالك.</p></>}
+     </section>}
+   </div>;
+ }
+diff --git a/src/components/catalog-sections.tsx b/src/components/catalog-sections.tsx
+index 7d02656..01704af 100644
+--- a/src/components/catalog-sections.tsx
++++ b/src/components/catalog-sections.tsx
+@@ -218,9 +218,8 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
+   const [companies, setCompanies] = useState<{ name: string; pending: number }[]>([]);
+   const [company, setCompany] = useState("");
+   const [orders, setOrders] = useState<OrderedLens[]>([]);
+-  const [costs, setCosts] = useState<Record<string, string>>({});
+-  const [bulkCost, setBulkCost] = useState("");
+-  const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput() });
++  const [pickedIds, setPickedIds] = useState<string[]>([]);
++  const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput(), totalAmount: "" });
+   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
+ 
+@@ -229,52 +228,51 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
+     try {
+       const result = await requestJson(`/api/lens-supplies/orders?branchId=${branchId}&company=${encodeURIComponent(selected)}`);
+       setCompanies(result.companies ?? []); setOrders(result.orders ?? []);
+-      setCosts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => (result.orders ?? []).some((o: OrderedLens) => o.id === id))));
++      setPickedIds((current) => current.filter((id) => (result.orders ?? []).some((o: OrderedLens) => o.id === id)));
+       setError("");
+     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الطلبات"); }
+   }, [branchId]);
+   useEffect(() => { void load(company); }, [load, company]);
+ 
+-  const picked = Object.keys(costs);
+-  const total = picked.reduce((sum, id) => sum + (Number(costs[id]) || 0), 0);
+-  function toggle(id: string) { setCosts((current) => { if (id in current) { const { [id]: _removed, ...rest } = current; return rest; } return { ...current, [id]: "" }; }); }
+-  function pickCompany(name: string) { setCompany(name); setCosts({}); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
+-  function selectAll() { setCosts(Object.fromEntries(orders.map((o) => [o.id, costs[o.id] ?? ""]))); }
+-  function applyBulk() { if (bulkCost === "") return; setCosts((current) => Object.fromEntries(Object.keys(current).map((id) => [id, bulkCost]))); }
++  const picked = pickedIds;
++  const total = Number(form.totalAmount) || 0;
++  function toggle(id: string) { setPickedIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id])); }
++  function pickCompany(name: string) { setCompany(name); setPickedIds([]); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
++  function selectAll() { setPickedIds(orders.map((o) => o.id)); }
+ 
+   async function save(event: FormEvent) {
+     event.preventDefault(); setError(""); setNotice("");
+     if (!picked.length) { setError("حدد العدسات التي وصلت أولاً"); return; }
+-    if (picked.some((id) => costs[id] === "" || Number(costs[id]) < 0)) { setError("اكتب سعر كل عدسة وصلت قبل التأكيد"); return; }
++    if (form.totalAmount === "" || Number(form.totalAmount) < 0) { setError("اكتب إجمالي مبلغ فاتورة المورد"); return; }
+     setBusy(true);
+     try {
+-      await requestJson("/api/lens-supplies/orders", { method: "POST", body: JSON.stringify({ ...form, receivedAt: new Date(form.receivedAt).toISOString(), branchId, company, items: picked.map((id) => ({ saleItemId: id, unitCost: Number(costs[id]) })) }) });
+-      setNotice(`تم تسجيل فاتورة التوريد وتعليم ${picked.length} عدسة كمستلمة`); setCosts({}); setBulkCost(""); setForm((f) => ({ ...f, invoiceNumber: "", receivedAt: localInput() })); await load(company);
++      await requestJson("/api/lens-supplies/orders", { method: "POST", body: JSON.stringify({ ...form, receivedAt: new Date(form.receivedAt).toISOString(), branchId, company, totalAmount: Number(form.totalAmount), saleItemIds: picked }) });
++      setNotice(`تم تسجيل فاتورة التوريد وتعليم ${picked.length} عدسة كمستلمة`); setPickedIds([]); setForm((f) => ({ ...f, invoiceNumber: "", totalAmount: "", receivedAt: localInput() })); await load(company);
+     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل التوريد"); await load(company); } finally { setBusy(false); }
+   }
+ 
+   return <>
+-    <div className="catalog-toolbar"><label>الفرع المستلم<select value={branchId} onChange={(e) => { setBranchId(e.target.value); setCompany(""); setCosts({}); setOrders([]); }}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
++    <div className="catalog-toolbar"><label>الفرع المستلم<select value={branchId} onChange={(e) => { setBranchId(e.target.value); setCompany(""); setPickedIds([]); setOrders([]); }}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+       <label>الشركة<select value={company} onChange={(e) => pickCompany(e.target.value)}><option value="">اختر الشركة…</option>{companies.map((c) => <option key={c.name} value={c.name}>{c.name} — {c.pending} مطلوبة</option>)}</select></label></div>
+     {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
+     {companies.length === 0 && !error && <p className="footnote">لا توجد عدسات مطلوبة من العملاء بانتظار الاستلام في هذا الفرع.</p>}
+     {company && <form className="catalog-form" onSubmit={save}>
+       <div className="sale-subheading"><strong>العدسات المطلوبة من {company} ({orders.length})</strong><span className="footnote">علّم العدسات التي وصلت فقط، وسيبقى الباقي مطلوبًا.</span></div>
+-      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setCosts({})} disabled={picked.length === 0}>إلغاء التحديد</button></div>
+-      <div className="order-lens-list">{orders.map((o) => { const on = o.id in costs; return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
++      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button></div>
++      <div className="order-lens-list">{orders.map((o) => { const on = picked.includes(o.id); return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
+         <input type="checkbox" aria-label={`وصلت عدسة فاتورة ${o.invoiceNumber}`} checked={on} onChange={() => toggle(o.id)} />
+         <label><strong>{o.lensTypeName}{o.options ? ` — ${o.options}` : ""}</strong><small>فاتورة #{o.invoiceNumber} · {o.customer}{o.phone ? ` · ${o.phone}` : ""} · {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(o.orderedAt))}</small><small>يمين: {rxText(o.right)} · يسار: {rxText(o.left)}</small></label>
+-        {on && <input className="cost" type="number" min="0" step="0.01" required placeholder="سعر الزوج" aria-label="سعر الزوج" value={costs[o.id]} onChange={(e) => setCosts({ ...costs, [o.id]: e.target.value })} />}</div>; })}
++</div>; })}
+         {orders.length === 0 && <span className="footnote">لا توجد عدسات مطلوبة من هذه الشركة.</span>}</div>
+       {picked.length > 0 && <>
+-        <div className="supply-bulk"><label>سعر موحد للمحدد<input type="number" min="0" step="0.01" value={bulkCost} onChange={(e) => setBulkCost(e.target.value)} placeholder="اختياري" /></label><button type="button" className="row-action" onClick={applyBulk} disabled={bulkCost === ""}>تطبيق</button></div>
+         <div className="catalog-fields">
+           <label>المورد<input required minLength={2} value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
+           <label>رقم هاتف المورد<input type="tel" value={form.supplierPhone} onChange={(e) => setForm({ ...form, supplierPhone: e.target.value })} /></label>
+           <label>رقم فاتورة المورد<input required value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} /></label>
+           <label>تاريخ الاستلام<input required type="datetime-local" value={form.receivedAt} onChange={(e) => setForm({ ...form, receivedAt: e.target.value })} /></label>
++          <label>إجمالي مبلغ الفاتورة<input required type="number" min="0" step="0.01" inputMode="decimal" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} placeholder="المبلغ الكامل كما في فاتورة المورد" /></label>
+         </div>
+-        <p><strong>إجمالي الفاتورة ({picked.length} عدسة): {money(total)}</strong></p>
++        <p><strong>{picked.length} عدسة وصلت — إجمالي الفاتورة: {money(total)}</strong></p>
+         <button className="primary" disabled={busy}>{busy ? "جارٍ التسجيل…" : "إتمام فاتورة التوريد"}</button>
+         <p className="footnote">العدسات المطلوبة لعملاء محددين لا تدخل مخزون الفرع؛ تُسجَّل فقط في فاتورة المورد وتُعلَّم كمستلمة.</p></>}
+     </form>}
