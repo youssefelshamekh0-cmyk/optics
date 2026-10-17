@@ -50,6 +50,10 @@ begin
      or nullif(trim(p_reason), '') is null then
     raise exception 'invalid return request';
   end if;
+  if (select count(*) from jsonb_array_elements(p_items)) <>
+     (select count(distinct value->>'saleItemId') from jsonb_array_elements(p_items)) then
+    raise exception 'duplicate sale item in return request';
+  end if;
 
   select s.id, s.branch_id, s.grand_total
   into v_sale
@@ -69,7 +73,7 @@ begin
     order by value->>'saleItemId'
   loop
     begin
-      v_sale_item.id := (v_item->>'saleItemId')::uuid;
+      perform (v_item->>'saleItemId')::uuid;
       v_requested_qty := (v_item->>'quantity')::integer;
     exception when others then raise exception 'invalid return item'; end;
     if v_requested_qty is null or v_requested_qty < 1 then raise exception 'invalid return quantity'; end if;
