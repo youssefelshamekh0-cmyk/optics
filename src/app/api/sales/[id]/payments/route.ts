@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
-const paymentSchema = z.object({ amount: z.number().finite().positive().max(1_000_000_000), paymentMethod: z.enum(["cash", "card", "instapay", "other"]), notes: z.string().trim().max(500).default("") });
+const paymentSchema = z.object({ amount: z.number().finite().positive().max(1_000_000_000), paymentMethod: z.enum(["cash", "card", "instapay", "other"]), notes: z.string().trim().max(500).default(""), operationId: z.string().uuid() });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { user, response } = await requirePermission("payments.record");
@@ -24,6 +24,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     p_received_by: user!.id, p_notes: parsed.data.notes,
   });
   if (error) return Response.json({ error: "تعذر تسجيل الدفعة؛ قد يكون المبلغ أكبر من المتبقي" }, { status: 400 });
-  await audit(user!.id, "sale.payment.record", "sale", id, { amount, paymentMethod: parsed.data.paymentMethod });
+  await audit(user!.id, "sale.payment.record", "sale", id, { amount, paymentMethod: parsed.data.paymentMethod, operationId: parsed.data.operationId });
   return Response.json({ paymentId: data }, { status: 201 });
 }
