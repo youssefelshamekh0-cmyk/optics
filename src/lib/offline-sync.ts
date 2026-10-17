@@ -235,6 +235,28 @@ export async function syncPendingOperations(): Promise<void> {
   }
 }
 
+export async function reviseOfflineSale(id: string, edits: { finalTotal: number; items: Array<{ name: string; quantity: number; productId?: string | null; itemKind?: string }> }): Promise<void> {
+  const operation = (await getActorOutbox()).find(item => item.id === id);
+  if (!operation || operation.type !== "sale.create" || (operation.status !== "conflict" && operation.status !== "rejected")) {
+    throw new Error("لا يمكن تعديل هذه العملية في حالتها الحالية");
+  }
+  if (!Number.isFinite(edits.finalTotal) || edits.finalTotal <= 0 || edits.items.length < 1 || edits.items.length > 20) {
+    throw new Error("راجع سعر البيع والبنود");
+  }
+  const normalizedItems = edits.items.map(item => ({
+    name: String(item.name ?? "").trim(),
+    quantity: Number(item.quantity),
+    productId: item.productId ?? null,
+    itemKind: item.itemKind ?? "product",
+  }));
+  if (normalizedItems.some(item => item.name.length < 2 || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 100)) {
+    throw new Error("اسم أو كمية أحد البنود غير صحيحة");
+  }
+  const payload = { ...operation.payload, finalTotal: Math.round(edits.finalTotal * 100) / 100, items: normalizedItems };
+  await putOperation({ ...operation, payload, status: "conflict", message: "تم تعديل الفاتورة محليًا. راجعها ثم أعد المحاولة.", updatedAt: Date.now() });
+  notify();
+}
+
 export async function retryOfflineOperation(id: string): Promise<void> {
   const operation = (await getActorOutbox()).find(item => item.id === id);
   if (!operation || (operation.status !== "conflict" && operation.status !== "rejected")) return;
