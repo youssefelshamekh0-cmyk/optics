@@ -57,12 +57,13 @@ begin
     raise exception 'duplicate sale item in return request';
   end if;
 
-  select s.id, s.branch_id, s.grand_total
+  select s.id, s.branch_id, s.grand_total, s.delivery_status
   into v_sale
   from public.sales s
   where s.id = p_sale_id
   for update;
   if not found then raise exception 'sale not found'; end if;
+  if v_sale.delivery_status = 'cancelled' then raise exception 'cancelled sale cannot be returned'; end if;
 
   if not exists (
     select 1 from public.cash_accounts ca
@@ -110,7 +111,7 @@ begin
   select coalesce(sum(sr.refund_amount),0) into v_refunded
   from public.sale_returns sr where sr.sale_id = p_sale_id;
 
-  if v_total_refund <= 0 or v_refunded + v_total_refund > v_paid then
+  if v_total_refund <= 0 or v_refunded + v_total_refund > least(v_paid, v_sale.grand_total) then
     raise exception 'refund exceeds net paid amount';
   end if;
 
