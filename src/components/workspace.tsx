@@ -14,6 +14,7 @@ import { InstallButton } from "@/components/pwa";
 import CentralCash from "@/components/central-cash";
 import StaffHours from "@/components/staff-hours";
 import AccountSection from "@/components/account-section";
+import { clearOfflineActor } from "@/lib/offline-sync";
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
@@ -78,7 +79,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الدخول"); }
     finally { setBusy(false); }
   }
-  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
+  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; clearOfflineActor(); setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
   async function createBranch(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
