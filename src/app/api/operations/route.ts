@@ -235,7 +235,15 @@ export async function POST(request:Request){
  }else if(action==="payrollPay"){
    if(!user!.roles.includes("super_admin"))return Response.json({error:"صرف الرواتب من الخزنة المركزية متاح للمالك فقط"},{status:403});const {data,error}=await admin.rpc("pay_payroll_idempotent",{p_payroll:parsed.data.payrollId,p_account:parsed.data.cashAccountId,p_amount:parsed.data.amount,p_actor:user!.id,p_operation_id:parsed.data.operationId});if(error)throw error;entityId=parsed.data.payrollId;
  }else if(action==="purchase"){
-   if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403}); const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
+   if(!branchAllowed(user!,parsed.data.branchId))return Response.json({error:"ليس لديك وصول لهذا الفرع"},{status:403});
+   if(parsed.data.cashAccountId){
+     const account=await admin.from("cash_accounts").select("id,branch_id,is_central,active").eq("id",parsed.data.cashAccountId).maybeSingle();
+     if(account.error)throw account.error;
+     if(!account.data||!account.data.active)return Response.json({error:"خزنة الدفع غير موجودة أو غير نشطة"},{status:409});
+     if(account.data.is_central&&!user!.roles.includes("super_admin"))return Response.json({error:"الدفع من الخزنة المركزية متاح لمالك البراند فقط"},{status:403});
+     if(!account.data.is_central&&account.data.branch_id!==parsed.data.branchId)return Response.json({error:"اختر خزنة تابعة لفرع المشتريات"},{status:409});
+   }
+   const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
  }
  if(entityId) await audit(user!.id,`operations.${action}`,action,entityId,action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive"?{result:actionResult}:{});
  return Response.json({success:true,id:entityId||null,...(action==="centralDeposit"?{depositResult:actionResult}:{}),...(action==="cashReconcile"?{reconciliation:actionResult}:{}),...(action==="transfer"||action==="transferReceive"?{transferResult:actionResult}:{})});
