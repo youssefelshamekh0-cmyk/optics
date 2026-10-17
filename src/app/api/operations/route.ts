@@ -114,7 +114,7 @@ export async function GET(request: Request) {
 const actionSchema=z.discriminatedUnion("action",[
  z.object({action:z.literal("delivery"),saleId:uuid,status:z.enum(["pending","processing","ready","delivered"]),notes:z.string().max(500).default("")}),
  z.object({action:z.literal("deliverAndCollect"),saleId:uuid,cashAccountId:uuid.optional().or(z.literal("")),discountAmount:z.number().min(0).max(100000000).default(0)}),
- z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,operationId:uuid,delta:z.number().int().min(-100000).max(100000),reason:z.string().trim().min(2).max(300)}),
+ z.object({action:z.literal("adjust"),branchId:uuid,productId:uuid,operationId:uuid,delta:z.number().int().min(-100000).max(100000).refine((value)=>value!==0),reason:z.string().trim().min(2).max(300)}),
  z.object({action:z.literal("transfer"),sourceBranchId:uuid,destinationBranchId:uuid,productId:uuid,quantity:z.number().int().min(1).max(100000),reason:z.string().trim().min(2).max(300),operationId:uuid}),
  z.object({action:z.literal("transferReceive"),transferId:uuid}),
  z.object({action:z.literal("cashAccount"),branchId:uuid,name:z.string().trim().min(2).max(120),accountType:z.enum(["cash","bank","digital"]),paymentMethod:z.enum(["cash","card","instapay","other"]),openingBalance:z.number().min(0).max(100000000)}),
