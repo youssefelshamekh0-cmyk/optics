@@ -35,12 +35,20 @@ export async function GET(request: Request) {
   // otherwise the receiving form can never be shown for the first supply.
   const products = await admin.from("products").select("id,name,sku,category,brand,model").in("category", ["lens", "contact_lens"]).eq("active", true).order("name");
   if (products.error) throw products.error;
-  if (!branchId) return Response.json({ supplies: [], products: products.data ?? [] });
+  // Lens types registered in the price list (the ones sale invoices use), grouped by company in the UI.
+  const [lensTypeRows, lensCompanyRows] = await Promise.all([
+    admin.from("lens_types").select("id,company_id,name,category").eq("active", true).order("name"),
+    admin.from("lens_companies").select("id,name").eq("active", true).order("name"),
+  ]);
+  if (lensTypeRows.error || lensCompanyRows.error) throw lensTypeRows.error ?? lensCompanyRows.error;
+  const companyName = new Map((lensCompanyRows.data ?? []).map((row) => [row.id, row.name]));
+  const lensTypes = (lensTypeRows.data ?? []).flatMap((row) => companyName.has(row.company_id) ? [{ id: row.id, name: row.name, category: row.category, company: companyName.get(row.company_id)! }] : []);
+  if (!branchId) return Response.json({ supplies: [], products: products.data ?? [], lensTypes });
   const { data: supplies, error } = await admin.from("lens_supplies")
     .select("id,invoice_number,supplier_id,branch_id,received_at,total_cost,status,created_at")
     .eq("branch_id", branchId).order("received_at", { ascending: false }).limit(100);
   if (error) throw error;
-  if (!supplies?.length) return Response.json({ supplies: [], products: products.data ?? [] });
+  if (!supplies?.length) return Response.json({ supplies: [], products: products.data ?? [], lensTypes });
   const [supplierRows, itemRows] = await Promise.all([
     admin.from("suppliers").select("id,name,phone").in("id", [...new Set(supplies.map((row) => row.supplier_id))]),
     admin.from("lens_supply_items").select("id,supply_id,product_id,quantity,unit_cost,line_total").in("supply_id", supplies.map((row) => row.id)),
@@ -53,6 +61,7 @@ export async function GET(request: Request) {
   return Response.json({
     supplies: supplies.map((supply) => ({ ...supply, supplier: supplierMap.get(supply.supplier_id) ?? null, items: (itemsBySupply.get(supply.id) ?? []).map((item) => ({ ...item, product: productMap.get(item.product_id) ?? null })) })),
     products: products.data ?? [],
+    lensTypes,
   });
 }
 

@@ -23,6 +23,8 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
   const isOwner = user.roles.includes("super_admin");
+  // The daily overview (invoices, collections and shift hours across the day) is for the brand owner only.
+  if (!isOwner) return Response.json({ error: "هذه الشاشة متاحة لمالك البراند" }, { status: 403 });
   const params = new URL(request.url).searchParams;
   const today = todayCairo();
   const dateParam = params.get("date");

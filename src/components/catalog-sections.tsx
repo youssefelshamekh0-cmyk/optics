@@ -46,37 +46,69 @@ export function ProductsSection({ branches }: { branches: Branch[] }) {
 }
 
 type Price = { id: string; sphere_min: number; sphere_max: number; cylinder_min: number | null; cylinder_max: number | null; options: string; cost_price: number; reference_price: number; lens: { name: string; category: string; company: string } | null };
+type TypeRow = { key: number; name: string; costPrice: string; referencePrice: string };
+const emptyTypeRow = (key: number): TypeRow => ({ key, name: "", costPrice: "0", referencePrice: "0" });
 export function LensPricesSection({ branches }: { branches: Branch[] }) {
   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
   const [branchId, setBranchId] = useState(""); const [prices, setPrices] = useState<Price[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
-  const [form, setForm] = useState({ company: "", type: "", category: "طبي", sphereMin: "-6", sphereMax: "6", cylinderMin: "", cylinderMax: "", options: "", costPrice: "0", referencePrice: "0" });
+  const [form, setForm] = useState({ company: "", category: "طبي", sphereMin: "-6", sphereMax: "6", cylinderMin: "", cylinderMax: "", options: "" });
+  const [rows, setRows] = useState<TypeRow[]>([emptyTypeRow(1)]);
+  const [nextKey, setNextKey] = useState(2);
   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
   const refresh = useCallback(async () => { if (!branchId) return; try { setPrices((await requestJson(`/api/lens-prices?branchId=${branchId}`)).prices); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الأسعار"); } }, [branchId]);
   useEffect(() => { void refresh(); }, [refresh]);
-  async function save(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); setNotice(""); try {
-    await requestJson("/api/lens-prices", { method: "POST", body: JSON.stringify({ ...form, branchId, sphereMin: Number(form.sphereMin), sphereMax: Number(form.sphereMax), cylinderMin: form.cylinderMin === "" ? null : Number(form.cylinderMin), cylinderMax: form.cylinderMax === "" ? null : Number(form.cylinderMax), costPrice: Number(form.costPrice), referencePrice: Number(form.referencePrice) }) });
-    setNotice("تم حفظ نطاق السعر للفرع"); await refresh();
-  } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ السعر"); } finally { setBusy(false); } }
+  const patchRow = (key: number, change: Partial<TypeRow>) => setRows(rows.map((r) => (r.key === key ? { ...r, ...change } : r)));
+  function addRow() { setRows([...rows, emptyTypeRow(nextKey)]); setNextKey(nextKey + 1); }
+  async function save(event: FormEvent) {
+    event.preventDefault(); setError(""); setNotice("");
+    const names = rows.map((r) => r.name.trim().toLowerCase());
+    if (new Set(names).size !== names.length) { setError("نوع العدسة مكرر في القائمة"); return; }
+    setBusy(true);
+    try {
+      const result = await requestJson("/api/lens-prices", { method: "POST", body: JSON.stringify({
+        branchId, company: form.company, category: form.category, options: form.options,
+        sphereMin: Number(form.sphereMin), sphereMax: Number(form.sphereMax),
+        cylinderMin: form.cylinderMin === "" ? null : Number(form.cylinderMin), cylinderMax: form.cylinderMax === "" ? null : Number(form.cylinderMax),
+        types: rows.map((r) => ({ name: r.name, costPrice: Number(r.costPrice), referencePrice: Number(r.referencePrice) })),
+      }) });
+      setNotice(`تم حفظ ${result.created} نوع بأسعارها للفرع`); setRows([emptyTypeRow(nextKey)]); setNextKey(nextKey + 1); await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر حفظ الأسعار"); } finally { setBusy(false); }
+  }
   return <section className="panel catalog-panel"><div className="section-heading"><div><p className="eyebrow">قائمة مرجعية مستقلة لكل فرع</p><h2>أسعار العدسات</h2></div><span className="count-badge">{prices.length} نطاق سعر</span></div>
     <div className="catalog-toolbar"><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label></div>
-    {error && <div className="notice error">{error}</div>}{notice && <div className="notice success">{notice}</div>}
-    <form className="catalog-form" onSubmit={save}><div className="section-heading"><div><p className="eyebrow">شركة ونوع ونطاق مقاس</p><h3>إضافة سعر مرجعي</h3></div></div><div className="catalog-fields">
-      <label>شركة العدسات<input required minLength={2} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></label><label>نوع العدسة<input required minLength={2} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} /></label><label>الفئة<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label>
-      <label>SPH من<input required type="number" step="0.25" value={form.sphereMin} onChange={(e) => setForm({ ...form, sphereMin: e.target.value })} /></label><label>SPH إلى<input required type="number" step="0.25" value={form.sphereMax} onChange={(e) => setForm({ ...form, sphereMax: e.target.value })} /></label><label>CYL من (اختياري)<input type="number" step="0.25" value={form.cylinderMin} onChange={(e) => setForm({ ...form, cylinderMin: e.target.value })} /></label><label>CYL إلى<input type="number" step="0.25" value={form.cylinderMax} onChange={(e) => setForm({ ...form, cylinderMax: e.target.value })} /></label>
-      <label>الإضافات أو الخيارات<input placeholder="مثال: بلوكات، فوتوكروميك" value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} /></label><label>التكلفة<input required type="number" min="0" step="0.01" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: e.target.value })} /></label><label>السعر المرجعي<input required type="number" min="0" step="0.01" value={form.referencePrice} onChange={(e) => setForm({ ...form, referencePrice: e.target.value })} /></label><button className="primary" disabled={busy || !branchId}>{busy ? "جارٍ الحفظ…" : "حفظ السعر"}</button>
-    </div></form>
+    {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
+    <form className="catalog-form" onSubmit={save}><div className="section-heading"><div><p className="eyebrow">شركة واحدة، عدة أنواع، ولكل نوع سعره</p><h3>إضافة أسعار مرجعية</h3></div></div>
+      <div className="catalog-fields">
+        <label>شركة العدسات<input required minLength={2} value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></label><label>الفئة<input required value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></label>
+        <label>SPH من<input required type="number" step="0.25" value={form.sphereMin} onChange={(e) => setForm({ ...form, sphereMin: e.target.value })} /></label><label>SPH إلى<input required type="number" step="0.25" value={form.sphereMax} onChange={(e) => setForm({ ...form, sphereMax: e.target.value })} /></label><label>CYL من (اختياري)<input type="number" step="0.25" value={form.cylinderMin} onChange={(e) => setForm({ ...form, cylinderMin: e.target.value })} /></label><label>CYL إلى<input type="number" step="0.25" value={form.cylinderMax} onChange={(e) => setForm({ ...form, cylinderMax: e.target.value })} /></label>
+        <label>الإضافات أو الخيارات<input placeholder="مثال: بلوكات، فوتوكروميك" value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} /></label>
+      </div>
+      <div className="supply-table-wrap"><div className="sale-subheading"><strong>أنواع العدسات لهذه الشركة</strong><span className="footnote">النطاق والخيارات أعلاه تنطبق على كل الأنواع؛ اكتب سعر كل نوع بجانبه.</span></div>
+        <div className="table-wrap"><table className="supply-table"><thead><tr><th>نوع العدسة</th><th>التكلفة</th><th>السعر المرجعي</th><th></th></tr></thead><tbody>
+          {rows.map((r, index) => <tr key={r.key}>
+            <td><input aria-label={`نوع العدسة ${index + 1}`} required minLength={2} maxLength={120} value={r.name} onChange={(e) => patchRow(r.key, { name: e.target.value })} placeholder="اسم النوع" /></td>
+            <td><input aria-label={`تكلفة ${r.name || `النوع ${index + 1}`}`} required type="number" min="0" step="0.01" value={r.costPrice} onChange={(e) => patchRow(r.key, { costPrice: e.target.value })} /></td>
+            <td><input aria-label={`سعر ${r.name || `النوع ${index + 1}`}`} required type="number" min="0" step="0.01" value={r.referencePrice} onChange={(e) => patchRow(r.key, { referencePrice: e.target.value })} /></td>
+            <td>{rows.length > 1 && <button type="button" className="quiet remove-sale-item" onClick={() => setRows(rows.filter((x) => x.key !== r.key))}>حذف</button>}</td></tr>)}
+        </tbody></table></div>
+        <button type="button" className="row-action" onClick={addRow} disabled={rows.length >= 30}>＋ إضافة نوع آخر</button>
+      </div>
+      <button className="primary" disabled={busy || !branchId}>{busy ? "جارٍ الحفظ…" : `حفظ ${rows.length > 1 ? `${rows.length} أنواع` : "السعر"}`}</button>
+    </form>
     <div className="table-wrap"><table><thead><tr><th>الشركة والنوع</th><th>SPH</th><th>CYL</th><th>الإضافات</th><th>التكلفة</th><th>السعر المرجعي</th></tr></thead><tbody>{prices.map((p) => <tr key={p.id}><td><strong>{p.lens?.company}</strong><small>{p.lens?.name} · {p.lens?.category}</small></td><td>{p.sphere_min} إلى {p.sphere_max}</td><td>{p.cylinder_min === null ? "الكل" : `${p.cylinder_min} إلى ${p.cylinder_max}`}</td><td>{p.options || "—"}</td><td>{money(Number(p.cost_price))}</td><td>{money(Number(p.reference_price))}</td></tr>)}{prices.length === 0 && <tr><td colSpan={6} className="table-empty">لم تضاف أسعار لهذا الفرع بعد.</td></tr>}</tbody></table></div>
-    <p className="footnote">النظام يمنع تداخل نطاقي قياسات متعارضين لنفس الشركة والنوع والخيارات. إدخال سعر العدسات تلقائيًا في الفاتورة يأتي بعد اكتمال وتدقيق جداول الفروع.</p>
+    <p className="footnote">النظام يمنع تداخل نطاقي قياسات متعارضين لنفس الشركة والنوع والخيارات. إذا تعارض نوع واحد لا يُحفظ أي نوع من المجموعة.</p>
   </section>;
 }
 
 type Supply = { id: string; invoice_number: string; received_at: string; total_cost: number; supplier: { name: string } | null; items: { id: string; quantity: number; unit_cost: number; product: { name: string } | null }[] };
+type RegisteredLens = { id: string; name: string; category: string; company: string };
 type SupplyLine = { key: string; productId?: string; newName?: string; category?: string; name: string; quantity: string; unitCost: string };
 const localInput = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
   const [branchId, setBranchId] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
+  const [lensTypes, setLensTypes] = useState<RegisteredLens[]>([]);
   const [supplies, setSupplies] = useState<Supply[]>([]);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ invoiceNumber: "", supplierName: "", supplierPhone: "", receivedAt: localInput() });
@@ -86,18 +118,32 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
   useEffect(() => { if (!branchId && activeBranches.length) setBranchId(activeBranches[0].id); }, [branchId, activeBranches]);
   const refresh = useCallback(async () => {
     if (!branchId) return;
-    try { const result = await requestJson(`/api/lens-supplies?branchId=${branchId}`); setSupplies(result.supplies ?? []); setProducts((result.products ?? []).filter((p: Product) => ["lens", "contact_lens"].includes(p.category))); setError(""); }
+    try { const result = await requestJson(`/api/lens-supplies?branchId=${branchId}`); setSupplies(result.supplies ?? []); setProducts((result.products ?? []).filter((p: Product) => ["lens", "contact_lens"].includes(p.category))); setLensTypes(result.lensTypes ?? []); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التوريدات"); }
   }, [branchId]);
   useEffect(() => { void refresh(); }, [refresh]);
 
   const picked = new Set(lines.map((l) => l.productId).filter(Boolean));
-  const visible = products.filter((p) => !filter.trim() || `${p.name} ${p.brand ?? ""} ${p.sku ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase()));
+  const pickedNames = new Set(lines.map((l) => l.name.trim().toLowerCase()));
+  const fullName = (l: RegisteredLens) => `${l.company} ${l.name}`.trim();
+  const q = filter.trim().toLowerCase();
+  const matches = (text: string) => !q || text.toLowerCase().includes(q);
+  const registeredNames = new Set(lensTypes.map((l) => fullName(l).toLowerCase()));
+  const companyEntries = Object.entries(lensTypes.filter((l) => matches(fullName(l))).reduce<Record<string, RegisteredLens[]>>((acc, l) => { (acc[l.company] ??= []).push(l); return acc; }, {}));
+  const otherProducts = products.filter((p) => !registeredNames.has(p.name.trim().toLowerCase()) && matches(`${p.name} ${p.brand ?? ""} ${p.sku ?? ""}`));
   const total = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0), 0);
   const patch = (key: string, change: Partial<SupplyLine>) => setLines(lines.map((l) => (l.key === key ? { ...l, ...change } : l)));
   function toggle(p: Product) {
     if (picked.has(p.id)) setLines(lines.filter((l) => l.productId !== p.id));
     else setLines([...lines, { key: p.id, productId: p.id, name: p.name, quantity: "1", unitCost: "" }]);
+  }
+  // Picking a registered lens reuses the matching stock product when one exists; otherwise the server creates it once.
+  function toggleRegistered(l: RegisteredLens) {
+    const name = fullName(l); const key = name.toLowerCase();
+    if (pickedNames.has(key)) { setLines(lines.filter((x) => x.name.trim().toLowerCase() !== key)); return; }
+    const existing = products.find((p) => p.name.trim().toLowerCase() === key);
+    if (existing) setLines([...lines, { key: existing.id, productId: existing.id, name: existing.name, quantity: "1", unitCost: "" }]);
+    else setLines([...lines, { key: `reg-${l.id}`, newName: name, category: /لاصق/.test(l.category) ? "contact_lens" : "lens", name, quantity: "1", unitCost: "" }]);
   }
   function addNew() {
     const name = newName.trim();
@@ -134,9 +180,11 @@ export function LensSuppliesSection({ branches }: { branches: Branch[] }) {
       </div>
       <div className="lens-picker">
         <div className="sale-subheading"><strong>أنواع العدسات المستلمة</strong><span className="footnote">اضغط على أي نوع لإضافته، واكتب كمية وسعر كل نوع.</span></div>
-        {products.length > 0 && <>
+        {(products.length > 0 || lensTypes.length > 0) && <>
           <input className="lens-filter" type="search" placeholder="ابحث في أنواع العدسات…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <div className="lens-chips" role="group" aria-label="أنواع العدسات">{visible.map((p) => <button type="button" key={p.id} className={`lens-chip ${picked.has(p.id) ? "on" : ""}`} aria-pressed={picked.has(p.id)} onClick={() => toggle(p)}>{picked.has(p.id) ? "✓ " : "＋ "}{p.name}{p.brand ? ` — ${p.brand}` : ""}</button>)}{visible.length === 0 && <span className="footnote">لا توجد أنواع مطابقة.</span>}</div>
+          {companyEntries.map(([company, types]) => <div key={company} className="lens-company-group"><strong className="footnote">{company} — عدسات مسجلة في الأسعار والفواتير</strong><div className="lens-chips" role="group" aria-label={`عدسات ${company}`}>{types.map((l) => { const on = pickedNames.has(fullName(l).toLowerCase()); return <button type="button" key={l.id} className={`lens-chip ${on ? "on" : ""}`} aria-pressed={on} onClick={() => toggleRegistered(l)}>{on ? "✓ " : "＋ "}{l.name}</button>; })}</div></div>)}
+          {otherProducts.length > 0 && <div className="lens-company-group"><strong className="footnote">أصناف عدسات أخرى بالمخزون</strong><div className="lens-chips" role="group" aria-label="أصناف العدسات">{otherProducts.map((p) => <button type="button" key={p.id} className={`lens-chip ${picked.has(p.id) ? "on" : ""}`} aria-pressed={picked.has(p.id)} onClick={() => toggle(p)}>{picked.has(p.id) ? "✓ " : "＋ "}{p.name}{p.brand ? ` — ${p.brand}` : ""}</button>)}</div></div>}
+          {companyEntries.length === 0 && otherProducts.length === 0 && <span className="footnote">لا توجد أنواع مطابقة.</span>}
         </>}
         <div className="lens-new"><input placeholder={products.length ? "نوع جديد غير موجود في القائمة" : "اكتب اسم أول نوع عدسة"} maxLength={160} value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNew(); } }} />
           <select aria-label="فئة النوع الجديد" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}><option value="lens">عدسة طبية</option><option value="contact_lens">عدسة لاصقة</option></select>

@@ -11,6 +11,8 @@ import ShiftPanel, { ShiftBadge } from "@/components/shift-panel";
 import DailyOverview from "@/components/daily-overview";
 import DeliveriesPanel from "@/components/deliveries-panel";
 import { InstallButton } from "@/components/pwa";
+import CentralCash from "@/components/central-cash";
+import StaffHours from "@/components/staff-hours";
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
@@ -122,18 +124,18 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
-      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="staff-hours" active={activeTab} setActive={setActiveTab}>ساعات الموظفين</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
     </nav>
     <Notice error={error} message={message}/>
     {activeTab === "overview" && <>
     <section className="welcome"><div><p className="eyebrow">مساحة العمل</p><h1>{isOwner ? "إدارة مركزية، رؤية أوضح." : `أهلًا ${user.name}`}</h1><p className="muted">{isOwner ? "تابع الفروع وحسابات فريقك من لوحة واحدة." : "الفروع المتاحة لك تظهر هنا."}</p></div><div className="welcome-art" aria-hidden="true"><span>◉</span><i/><b/></div></section>
     <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={isOwner ? String(staff.length).padStart(2, "0") : "—"} detail={isOwner ? "حسابات المستخدمين" : "حسب صلاحيتك"}/></section>
     <ShiftPanel />
-    <DailyOverview />
+    {isOwner && <DailyOverview />}
     <FinanceCharts />
-    <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
+    {isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
-    </section></>}
+    </section>}</>}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
@@ -141,7 +143,9 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "purchases" && <OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+    {isOwner && activeTab === "finance" && <CentralCash />}
     {isOwner && activeTab === "finance" && <OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+    {isOwner && activeTab === "staff-hours" && <StaffHours branches={branches} />}
     {isOwner && activeTab === "staff-finance" && <OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
