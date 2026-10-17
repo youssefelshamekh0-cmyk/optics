@@ -55,7 +55,7 @@ export async function GET(request: Request) {
   }
   const allSales = allSalesR.data ?? [];
   const periodSales = periodSalesR.data ?? [];
-  const saleById = new Map(allSales.map((sale: any) => [sale.id, sale]));
+  const saleById = new Map<string, any>(allSales.map((sale: any) => [sale.id, sale] as [string, any]));
   const saleIds = allSales.map((sale: any) => sale.id);
   const periodSaleIds = periodSales.map((sale: any) => sale.id);
 
@@ -101,8 +101,8 @@ export async function GET(request: Request) {
     else aging.over90.push(row);
   }
 
-  const branches = new Map((branchesR.data ?? []).map((b: any) => [b.id, b.name]));
-  const profiles = new Map((profilesR.data ?? []).map((p: any) => [p.id, p.full_name]));
+  const branches = new Map<string, string>((branchesR.data ?? []).map((b: any) => [b.id, b.name] as [string, string]));
+  const profiles = new Map<string, string>((profilesR.data ?? []).map((p: any) => [p.id, p.full_name] as [string, string]));
   const revenueByBranch = new Map<string, number>();
   const performance = new Map<string, { userId: string; userName: string; invoiceCount: number; invoiced: number; collected: number; returned: number }>();
   for (const sale of periodSales as any[]) {
@@ -136,7 +136,7 @@ export async function GET(request: Request) {
     ? await admin.from("sales").select("id,branch_id,created_by").in("id", returnSaleIds)
     : { data: [], error: null };
   if (returnSalesR.error) return Response.json({ error: "تعذر ربط المرتجعات بالفروع" }, { status: 500 });
-  const returnSaleMap = new Map((returnSalesR.data ?? []).map((s: any) => [s.id, s]));
+  const returnSaleMap = new Map<string, any>((returnSalesR.data ?? []).map((s: any) => [s.id, s] as [string, any]));
   for (const ret of returnRows as any[]) {
     if (branchId && ret.branch_id !== branchId) continue;
     const sale = returnSaleMap.get(ret.sale_id) as any;
