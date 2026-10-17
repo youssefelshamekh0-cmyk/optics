@@ -171,7 +171,30 @@ export async function cachedRequestJson<T>(url: string, init?: RequestInit): Pro
   if ((method === "GET" && canCache(parsedUrl)) || (method === "POST" && ["/api/sales", "/api/customers"].includes(parsedUrl.pathname))) await refreshOfflineActor();
   const cacheable = method === "GET" && canCache(parsedUrl);
 
-  if (method === "POST" && parsedUrl.pathname === "/api/customers") {\n    const raw = typeof init?.body === "string" ? init.body : "{}";\n    const payload = JSON.parse(raw) as Record<string, unknown>;\n    const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();\n    const safePayload = { ...payload, operationId };\n    const actorId = storedActorId();\n    if (!actorId) throw new Error("لا يمكن حفظ العميل دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");\n    try {\n      const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, body: JSON.stringify(safePayload) });\n      const data = await response.json().catch(() => ({}));\n      if (!response.ok) throw Object.assign(new Error(data.error ?? "تعذر حفظ العميل"), { status: response.status });\n      return data as T;\n    } catch (error) {\n      const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : 0;\n      if (status) throw error;\n      const localCustomerId = crypto.randomUUID();\n      const now = Date.now();\n      await putOperation({ id: operationId, actorId, type: "customer.create", url: "/api/customers", payload: safePayload, localCustomerId, status: "pending", createdAt: now, updatedAt: now, message: "عميل محفوظ محليًا؛ سيُنشأ على الخادم قبل مزامنة فواتيره." });\n      notify();\n      return { queued: true, operationId, customer: { id: localCustomerId, full_name: String(payload.name ?? ""), phone: String(payload.phone ?? ""), email: String(payload.email ?? ""), notes: String(payload.notes ?? "") } } as T;\n    }\n  }\n\n  if (method === "POST" && parsedUrl.pathname === "/api/sales") {
+  if (method === "POST" && parsedUrl.pathname === "/api/customers") {
+    const raw = typeof init?.body === "string" ? init.body : "{}";
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
+    const safePayload = { ...payload, operationId };
+    const actorId = storedActorId();
+    if (!actorId) throw new Error("لا يمكن حفظ العميل دون جلسة مستخدم محفوظة. اتصل بالإنترنت وافتح النظام أولاً.");
+    try {
+      const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, body: JSON.stringify(safePayload) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw Object.assign(new Error(data.error ?? "تعذر حفظ العميل"), { status: response.status });
+      return data as T;
+    } catch (error) {
+      const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : 0;
+      if (status) throw error;
+      const localCustomerId = crypto.randomUUID();
+      const now = Date.now();
+      await putOperation({ id: operationId, actorId, type: "customer.create", url: "/api/customers", payload: safePayload, localCustomerId, status: "pending", createdAt: now, updatedAt: now, message: "عميل محفوظ محليًا؛ سيُنشأ على الخادم قبل مزامنة فواتيره." });
+      notify();
+      return { queued: true, operationId, customer: { id: localCustomerId, full_name: String(payload.name ?? ""), phone: String(payload.phone ?? ""), email: String(payload.email ?? ""), notes: String(payload.notes ?? "") } } as T;
+    }
+  }
+
+  if (method === "POST" && parsedUrl.pathname === "/api/sales") {
     const raw = typeof init?.body === "string" ? init.body : "{}";
     const payload = JSON.parse(raw) as Record<string, unknown>;
     const operationId = typeof payload.operationId === "string" ? payload.operationId : crypto.randomUUID();
@@ -364,4 +387,5 @@ export function registerOfflineSync() {
   void sync();
   return () => { window.removeEventListener("online", sync); window.removeEventListener("focus", sync); };
 }
-\nexport const syncPendingSales = syncPendingOperations;\n
+
+export const syncPendingSales = syncPendingOperations;
