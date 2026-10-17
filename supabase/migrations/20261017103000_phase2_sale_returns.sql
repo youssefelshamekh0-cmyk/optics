@@ -24,7 +24,7 @@ create index if not exists sale_return_items_sale_item_idx on public.sale_return
 
 alter table public.cash_transactions drop constraint if exists cash_transactions_transaction_type_check;
 alter table public.cash_transactions add constraint cash_transactions_transaction_type_check
-  check (transaction_type in ('sale_payment','sale_refund','supplier_payment','expense','payroll','commission','adjustment'));
+  check (transaction_type in ('sale_payment','sale_refund','supplier_payment','expense','payroll','payroll_advance','commission','adjustment'));
 
 create or replace function public.process_sale_return(
   p_sale_id uuid,
