@@ -126,7 +126,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
-      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff-finance" active={activeTab} setActive={setActiveTab}>الموظفون والرواتب</Tab><Tab id="staff-hours" active={activeTab} setActive={setActiveTab}>ساعات الموظفين</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
     </nav>
     <Notice error={error} message={message}/>
     {activeTab === "overview" && <>
@@ -148,8 +148,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && activeTab === "purchases" && <OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "finance" && <CentralCash />}
     {isOwner && activeTab === "finance" && <OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
-    {isOwner && activeTab === "staff-hours" && <StaffHours branches={branches} />}
-    {isOwner && activeTab === "staff-finance" && <OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
+    {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /></>}
     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
     {isOwner && activeTab === "branches" && <>
