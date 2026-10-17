@@ -1,13 +1,24 @@
 -- Preserve cost of goods at the time each sale line is created.
 alter table public.sale_items add column if not exists unit_cost numeric(12,2) not null default 0
   check (unit_cost >= 0);
+alter table public.sale_items add column if not exists unit_cost_is_estimated boolean not null default true;
 
--- Historical rows can only be estimated from today's branch cost; the report marks those rows as estimated.
+-- Legacy product lines can only be estimated from current branch cost.
 update public.sale_items si
-set unit_cost = bp.cost_price
+set unit_cost = bp.cost_price,
+    unit_cost_is_estimated = true
 from public.sales s, public.branch_products bp
 where si.sale_id=s.id and bp.branch_id=s.branch_id and bp.product_id=si.product_id
   and si.unit_cost=0 and bp.cost_price>0;
+
+-- Legacy prescription-lens costs reconstructed from current price rows are estimates.
+update public.sale_items si
+set unit_cost = coalesce(r.cost_price,0) + coalesce(l.cost_price,0),
+    unit_cost_is_estimated = true
+from public.sales s
+left join public.branch_lens_prices r on r.id=nullif(si.technical_details->'right'->>'priceId','')::uuid and r.branch_id=s.branch_id
+left join public.branch_lens_prices l on l.id=nullif(si.technical_details->'left'->>'priceId','')::uuid and l.branch_id=s.branch_id
+where si.sale_id=s.id and si.product_id is null and si.item_kind='prescription_lens';
 
 create or replace function public.capture_sale_item_unit_cost()
 returns trigger
@@ -15,10 +26,26 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare v_branch uuid; v_cost numeric(12,2);
+declare v_branch uuid; v_cost numeric(12,2); v_right_cost numeric(12,2); v_left_cost numeric(12,2);
 begin
-  if new.product_id is null then
+  if new.product_id is null and new.item_kind='prescription_lens' then
+    select branch_id into v_branch from public.sales where id=new.sale_id;
+    if not found then raise exception 'sale not found for sale item'; end if;
+    select cost_price into v_right_cost from public.branch_lens_prices
+      where id=nullif(new.technical_details->'right'->>'priceId','')::uuid and branch_id=v_branch and active;
+    select cost_price into v_left_cost from public.branch_lens_prices
+      where id=nullif(new.technical_details->'left'->>'priceId','')::uuid and branch_id=v_branch and active;
+    if v_right_cost is not null and v_left_cost is not null then
+      new.unit_cost:=round(v_right_cost+v_left_cost,2);
+      new.unit_cost_is_estimated:=false;
+    else
+      new.unit_cost:=0;
+      new.unit_cost_is_estimated:=true;
+    end if;
+    return new;
+  elsif new.product_id is null then
     new.unit_cost := 0;
+    new.unit_cost_is_estimated := true;
     return new;
   end if;
   select branch_id into v_branch from public.sales where id=new.sale_id;
@@ -27,6 +54,7 @@ begin
    where branch_id=v_branch and product_id=new.product_id;
   if not found then raise exception 'product cost not configured for branch'; end if;
   new.unit_cost := coalesce(v_cost,0);
+  new.unit_cost_is_estimated := false;
   return new;
 end;
 $$;
