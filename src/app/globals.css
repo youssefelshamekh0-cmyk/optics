@@ -208,3 +208,23 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
   .notice { flex-wrap:wrap; }
   .notice-retry { margin-inline-start:0; }
 }
+
+
+/* Return workflow layout: keep labels and actions readable at desktop and mobile widths. */
+.sale-return-form { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; width:100%; max-width:100%; padding:16px; border:1px solid #dce9e1; border-radius:12px; background:#fbfdfb; box-sizing:border-box; }
+.sale-return-form > div:first-child { min-width:0; }
+.sale-return-form .return-item-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(76px,120px); align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); }
+.sale-return-form .return-item-row > span { overflow-wrap:anywhere; line-height:1.7; }
+.sale-return-form .return-item-row input { width:100%; min-width:0; }
+.return-balance { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:10px; padding:10px 12px; border-radius:9px; background:#edf5f0; color:var(--green-deep); font-size:12px; }
+.return-balance span { display:flex; flex-wrap:wrap; gap:4px; }
+.sale-return-form textarea { width:100%; min-height:72px; }
+.sale-return-form > .primary { width:100%; white-space:normal; line-height:1.5; padding:10px 14px; }
+.sale-return-area { min-width:0; }
+.sale-detail { min-width:0; }
+@media (max-width:640px) {
+  .sale-return-form { padding:12px; gap:12px; }
+  .sale-return-form .return-item-row { grid-template-columns:minmax(0,1fr) 78px; }
+  .return-balance { flex-direction:column; gap:6px; }
+  .sale-return-form > .primary { min-height:46px; }
+}
