@@ -228,3 +228,18 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
   .return-balance { flex-direction:column; gap:6px; }
   .sale-return-form > .primary { min-height:46px; }
 }
+
+
+/* Invoice row actions restored from the former deliveries view. */
+.invoice-row-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:145px; }
+.invoice-row-actions .row-action { min-height:36px; }
+.invoice-row-actions .row-action:disabled { opacity:.55; }
+.sales-table td .status-select { display:block; width:100%; min-width:105px; margin-top:6px; }
+@media (max-width:640px) {
+  .invoice-row-actions { min-width:140px; gap:5px; }
+  .invoice-row-actions .row-action { flex:1 0 auto; min-height:40px; }
+  .sales-table td .status-select { min-height:40px; }
+}
+@media print {
+  .invoice-row-actions, .status-select { display:none !important; }
+}
