@@ -16,8 +16,10 @@ const dateOf = (iso: string) => new Date(iso).toLocaleDateString("ar-EG");
 const PRINT_CSS = `*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#1e292c;margin:24px;font-size:13px}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px}.meta{color:#69767a;font-size:12px;margin-bottom:14px}
 table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border:1px solid #cfd8d3;padding:7px 9px;text-align:right;vertical-align:top}th{background:#eef4f0;font-size:12px}small{display:block;color:#69767a;font-size:11px}
 .totals{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.totals div{border:1px solid #cfd8d3;border-radius:8px;padding:8px 10px}.totals b{display:block;font-size:15px;margin-top:2px}.due b{color:#a34039}
-.sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:46px}.sign div{border-top:1px solid #1e292c;padding-top:6px;text-align:center;font-size:12px}.brand{font-size:12px;color:#27685f;font-weight:bold;margin-bottom:10px}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:46px}.sign div{border-top:1px solid #1e292c;padding-top:6px;text-align:center;font-size:12px}.brand-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}.brand-logo-print{max-width:110px;max-height:64px;object-fit:contain}.brand{font-size:12px;color:#27685f;font-weight:bold;margin-bottom:10px}
 @media print{body{margin:10mm}}`;
+
+function printBrandHeader(name: string, logoUrl: string | null) { return `<div class="brand-header">${logoUrl ? `<img class="brand-logo-print" src="${esc(logoUrl)}" alt="شعار البراند">` : ""}<div class="brand">${esc(name)}</div></div>`; }
 
 /** Print an HTML document through a hidden iframe (no pop-up window needed). */
 function printHtml(title: string, body: string) {
@@ -25,21 +27,21 @@ function printHtml(title: string, body: string) {
   frame.setAttribute("aria-hidden", "true");
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
   frame.srcdoc = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body>${body}</body></html>`;
-  frame.onload = () => { const w = frame.contentWindow; if (!w) return; w.focus(); w.print(); setTimeout(() => frame.remove(), 60000); };
+  frame.onload = () => { const w = frame.contentWindow; if (!w) return; const images = Array.from(frame.contentDocument?.images ?? []); Promise.all(images.map((img) => img.complete ? Promise.resolve() : new Promise<void>((resolve) => { img.onload = () => resolve(); img.onerror = () => resolve(); }))).then(() => { w.focus(); w.print(); setTimeout(() => frame.remove(), 60000); }); };
   document.body.appendChild(frame);
 }
 
-function printList(rows: Sale[], branchName: string, filters: string) {
+function printList(rows: Sale[], branchName: string, filters: string, brand: { name: string; logoUrl: string | null }) {
   const total = rows.reduce((s, r) => s + Number(r.grand_total), 0), paid = rows.reduce((s, r) => s + r.paid_amount, 0), due = rows.reduce((s, r) => s + r.due_amount, 0);
-  printHtml("قائمة التسليمات", `<div class="brand">نظرة | إدارة الفروع</div><h1>قائمة التسليمات</h1><div class="meta">${esc(branchName)} — ${esc(filters)} — طُبعت ${esc(new Date().toLocaleString("ar-EG"))}</div>
+  printHtml("قائمة التسليمات", `${printBrandHeader(brand.name, brand.logoUrl)}<h1>قائمة التسليمات</h1><div class="meta">${esc(branchName)} — ${esc(filters)} — طُبعت ${esc(new Date().toLocaleString("ar-EG"))}</div>
   <table><thead><tr><th>#</th><th>الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الهاتف</th><th>الفرع</th><th>الإجمالي</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
   ${rows.map((r, i) => `<tr><td>${i + 1}</td><td>#${r.invoice_number}</td><td>${esc(dateOf(r.created_at))}</td><td>${esc(r.customers?.full_name)}</td><td>${esc(r.customers?.phone)}</td><td>${esc(r.branches?.name)}</td><td>${esc(money(Number(r.grand_total)))}</td><td>${r.due_amount > 0 ? esc(money(r.due_amount)) : "—"}</td><td>${esc(statusLabel[r.delivery_status])}</td></tr>`).join("") || `<tr><td colspan="9">لا توجد فواتير مطابقة</td></tr>`}</tbody></table>
   <div class="totals"><div>عدد الفواتير<b>${rows.length}</b></div><div>الإجمالي<b>${esc(money(total))}</b></div><div class="due">المتبقي<b>${esc(money(due))}</b></div></div><div class="meta" style="margin-top:8px">المدفوع: ${esc(money(paid))}</div>`);
 }
 
-function printSlip(s: Sale) {
+function printSlip(s: Sale, brand: { name: string; logoUrl: string | null }) {
   const items = s.sale_items ?? [];
-  printHtml(`فاتورة ${s.invoice_number}`, `<div class="brand">نظرة | إدارة الفروع</div><h1>فاتورة #${s.invoice_number}</h1><div class="meta">${esc(s.branches?.name)} — ${esc(dateOf(s.created_at))} — الحالة: ${esc(statusLabel[s.delivery_status])}</div>
+  printHtml(`فاتورة ${s.invoice_number}`, `${printBrandHeader(brand.name, brand.logoUrl)}<h1>فاتورة #${s.invoice_number}</h1><div class="meta">${esc(s.branches?.name)} — ${esc(dateOf(s.created_at))} — الحالة: ${esc(statusLabel[s.delivery_status])}</div>
   <h2>العميل</h2><table><tbody><tr><th>الاسم</th><td>${esc(s.customers?.full_name)}</td><th>الهاتف</th><td>${esc(s.customers?.phone)}</td></tr></tbody></table>
   <h2>البنود</h2><table><thead><tr><th>البند</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${items.map((i) => `<tr><td>${esc(i.item_name)}</td><td>${esc(i.quantity)}</td><td>${esc(money(Number(i.unit_price)))}</td><td>${esc(money(Number(i.line_total)))}</td></tr>`).join("") || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
   <div class="totals"><div>الإجمالي<b>${esc(money(Number(s.grand_total)))}</b></div><div>المدفوع<b>${esc(money(s.paid_amount))}</b></div><div class="due">المتبقي<b>${esc(money(s.due_amount))}</b></div></div>
@@ -49,6 +51,7 @@ function printSlip(s: Sale) {
 export default function DeliveriesPanel({ branches, branchIds, isOwner }: { branches: Branch[]; branchIds: string[]; isOwner: boolean }) {
   const available = useMemo(() => branches.filter((b) => b.status === "ACTIVE" && (isOwner || branchIds.includes(b.id))), [branches, branchIds, isOwner]);
   const [branchId, setBranchId] = useState("");
+  const [brandIdentity, setBrandIdentity] = useState<{ name: string; logoUrl: string | null }>({ name: "نظرة | إدارة الفروع", logoUrl: null });
   const [sales, setSales] = useState<Sale[]>([]);
   const [status, setStatus] = useState<"all" | (typeof STATUSES)[number]>("all");
   const [payment, setPayment] = useState<"all" | "due" | "paid">("all");
@@ -65,6 +68,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل التسليمات"); }
   }, [branchId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { let active = true; fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (active && j && !j.error) setBrandIdentity({ name: j.brandName ?? "نظرة | إدارة الفروع", logoUrl: j.logoUrl ?? null }); }).catch(() => {}); return () => { active = false; }; }, []);
 
   async function updateStatus(saleId: string, next: string) {
     setBusy(true); setError(""); setNotice("");
@@ -86,7 +90,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
   return (
     <section className="panel operations-panel deliveries-panel">
       <div className="section-heading"><div><p className="eyebrow">دورة الطلب</p><h2>التسليمات</h2></div>
-        <button type="button" className="row-action" onClick={() => printList(rows, branchName, filterText)} disabled={!rows.length}>🖨 طباعة القائمة ({rows.length})</button></div>
+        <button type="button" className="row-action" onClick={() => printList(rows, branchName, filterText, brandIdentity)} disabled={!rows.length}>🖨 طباعة القائمة ({rows.length})</button></div>
       {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
       <div className="ops-toolbar">
         <label className="ops-branch">الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{available.map((b) => <option value={b.id} key={b.id}>{b.name}</option>)}</select></label>
@@ -101,7 +105,7 @@ export default function DeliveriesPanel({ branches, branchIds, isOwner }: { bran
         {rows.map((s) => <tr key={s.id}><td>#{s.invoice_number}<small>{dateOf(s.created_at)}</small></td><td>{s.customers?.full_name}<small>{s.customers?.phone}</small></td><td>{s.branches?.name}</td><td>{money(Number(s.grand_total))}</td><td>{s.due_amount > 0 ? <strong className="due">{money(s.due_amount)}</strong> : "—"}</td>
           <td><span className={`status-pill s-${s.delivery_status}`}>{statusLabel[s.delivery_status]}</span></td>
           <td><select className="status-select" aria-label={`حالة الفاتورة ${s.invoice_number}`} value={s.delivery_status} disabled={busy || s.delivery_status === "delivered"} onChange={(e) => void updateStatus(s.id, e.target.value)}>{STATUSES.map((x) => <option value={x} key={x}>{statusLabel[x]}</option>)}</select></td>
-          <td><button type="button" className="row-action" onClick={() => printSlip(s)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
+          <td><button type="button" className="row-action" onClick={() => printSlip(s, brandIdentity)} aria-label={`طباعة الفاتورة ${s.invoice_number}`}>🖨</button></td></tr>)}
         {rows.length === 0 && <tr><td colSpan={8} className="table-empty">لا توجد طلبات مطابقة.</td></tr>}
       </tbody></table></div>
       <p className="footnote">كل تغيير حالة يُحفظ في سجل تسليم الفاتورة. القائمة تعرض آخر 200 فاتورة غير ملغاة.</p>
