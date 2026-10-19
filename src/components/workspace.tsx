@@ -165,7 +165,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && activeTab === "finance" && <><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><ReportsPanel branches={branches} mode="finance" /></>}
     {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /><ReportsPanel branches={branches} mode="staff" /></>}
     {isOwner && activeTab === "sales-reports" && <ReportsPanel branches={branches} mode="sales" />}
-    {isOwner && activeTab === "brand-settings" && <BrandLogoSettings />}
+    {isOwner && activeTab === "brand-settings" && <BrandLogoSettings />}}
     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
     {isOwner && activeTab === "branches" && <>
