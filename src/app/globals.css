@@ -243,3 +243,17 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
 @media print {
   .invoice-row-actions, .status-select { display:none !important; }
 }
+
+
+/* Invoice returns modal and brand settings */
+.return-modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(17,30,28,.58);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
+.return-modal{width:min(640px,100%);max-height:min(88vh,850px);overflow-y:auto;background:var(--white);border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 80px #101f1d40;padding:24px;display:flex;flex-direction:column;gap:16px}
+.return-modal-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line);padding-bottom:14px}
+.return-modal-heading h3{margin:4px 0 0;font-size:19px}
+.return-modal-heading .eyebrow{margin:0}
+.return-modal .sale-return-form{display:flex;flex-direction:column;gap:14px}
+.return-modal .return-item-row{display:grid;grid-template-columns:minmax(0,1fr) 100px;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.return-modal .return-item-row input{width:100%;min-width:0}
+.return-modal .return-balance{display:flex;flex-wrap:wrap;gap:10px 22px;padding:12px;border-radius:10px;background:var(--mint)}
+.brand-logo-controls>label:first-child input[type=text]{width:100%;margin-top:7px}
+@media(max-width:640px){.return-modal-backdrop{padding:8px;align-items:flex-end}.return-modal{padding:16px;border-radius:18px 18px 10px 10px;max-height:92vh}.return-modal-heading h3{font-size:16px}.top-actions{gap:10px}}
