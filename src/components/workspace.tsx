@@ -129,6 +129,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       <Tab id="overview" active={activeTab} setActive={setActiveTab}>نظرة عامة</Tab>
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
       {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
+      {(isOwner || user.permissions.includes("returns.manage") || user.permissions.includes("payments.record")) && <Tab id="returns" active={activeTab} setActive={setActiveTab}>المرتجعات</Tab>}
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
@@ -147,6 +148,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {activeTab === "account" && <AccountSection isOwner={isOwner} />}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <><SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} /><ReportsPanel branches={branches} mode="sales" /></>}
+    {activeTab === "returns" && (isOwner || user.permissions.includes("returns.manage") || user.permissions.includes("payments.record")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={false} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={false} canManageCustomers={false} view="returns" />}
     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {!isOwner && activeTab === "seller-finance" && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
