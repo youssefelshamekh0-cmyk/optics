@@ -15,6 +15,8 @@ function downloadCsv(name:string,rows:(string|number)[][]){const csv="\uFEFF"+ro
 export default function ReportsPanel({branches,mode}:{branches:Branch[];mode:"staff"|"finance"|"sales"}){
  const printReport=()=>{document.body.classList.add("printing-reports");window.addEventListener("afterprint",()=>document.body.classList.remove("printing-reports"),{once:true});window.print();};
  const kind=mode;
+ const [brandName,setBrandName]=useState("نظرة");
+ useEffect(()=>{let active=true;fetch("/api/brand-settings",{cache:"no-store"}).then(r=>r.json()).then(j=>{if(active&&!j.error)setBrandName(j.brandName??"نظرة")}).catch(()=>{});return()=>{active=false}},[]);
  const [from,setFrom]=useState(startMonth);const [to,setTo]=useState(()=>day(new Date()));
  const [branchId,setBranchId]=useState("");const [employeeId,setEmployeeId]=useState("");
  const [employees,setEmployees]=useState<Employee[]>([]);const [payroll,setPayroll]=useState<Payroll[]>([]);
@@ -36,14 +38,14 @@ export default function ReportsPanel({branches,mode}:{branches:Branch[];mode:"st
  const totalPayroll=staffRows.reduce((s,p)=>s+Number(p.base_salary)+Number(p.commission_amount)-Number(p.deductions),0);
  const totalExpenses=financeExpenses.reduce((s,e)=>s+Number(e.amount),0);
  return <section className="panel operations-panel reports-print-root">
-  <div className="section-heading"><div><p className="eyebrow">تقارير الإدارة</p><h2>{kind==="staff"?"تقارير الموظفين وكشوف الحساب":kind==="finance"?"التقارير المالية للبراند والفروع":"تقارير المبيعات والأصناف الأكثر مبيعًا"}</h2><p className="muted">فلترة بالتاريخ والفرع، مع حفظ التقرير PDF.</p></div></div>
+  <div className="section-heading"><div><p className="eyebrow">{brandName} · تقارير الإدارة</p><h2>{kind==="staff"?"تقارير الموظفين وكشوف الحساب":kind==="finance"?"التقارير المالية للبراند والفروع":"تقارير المبيعات والأصناف الأكثر مبيعًا"}</h2><p className="muted">فلترة بالتاريخ والفرع، مع حفظ التقرير PDF.</p></div></div>
   <div className="ops-toolbar">
    <label>من تاريخ<input type="date" value={from} max={to} onChange={e=>setFrom(e.target.value)}/></label><label>إلى تاريخ<input type="date" value={to} min={from} onChange={e=>setTo(e.target.value)}/></label>
    <label>النطاق<select value={branchId} onChange={e=>setBranchId(e.target.value)}><option value="">البراند بالكامل · كل الفروع</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
    {kind==="staff"&&<label>الموظف<select value={employeeId} onChange={e=>setEmployeeId(e.target.value)}><option value="">كل الموظفين</option>{employees.filter(e=>!branchId||e.branch_id===branchId).map(e=><option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>}
    <button type="button" className="row-action" onClick={()=>void load()} disabled={busy}>{busy?"جارٍ التحديث…":"تحديث"}</button>
    <button type="button" className="row-action" onClick={printReport}>طباعة / حفظ PDF</button>
-   <button type="button" className="row-action" onClick={()=>kind==="sales"?downloadCsv("sales-best-sellers.csv",[["الصنف","الكمية المباعة","إجمالي قيمة البيع"],...bestSellers.map(p=>[p.name,p.quantity,p.revenue])]):kind==="staff"?downloadCsv("employee-reports.csv",[["الموظف","من","إلى","الراتب الأساسي","العمولة","الخصومات","الصافي","الحالة"],...staffRows.map(p=>[p.employee?.full_name??"",p.period_start,p.period_end,p.base_salary,p.commission_amount,p.deductions,Number(p.base_salary)+Number(p.commission_amount)-Number(p.deductions),p.status])]):downloadCsv("brand-financial-report.csv",[["التاريخ","الفرع","البند","التصنيف","القيمة"],...financeExpenses.map(e=>[e.expense_date,e.branches?.name??"",e.description,e.category,e.amount]),...financeTransactions.map(t=>[t.created_at.slice(0,10),branchAccounts.find(a=>a.id===t.cash_account_id)?.branches?.name??"الخزنة المركزية",t.description,t.transaction_type,(t.direction==="in"?1:-1)*Number(t.amount)])])}>استخراج التقرير</button>
+   <button type="button" className="row-action" onClick={()=>kind==="sales"?downloadCsv("sales-best-sellers.csv",[[brandName],["الصنف","الكمية المباعة","إجمالي قيمة البيع"],...bestSellers.map(p=>[p.name,p.quantity,p.revenue])]):kind==="staff"?downloadCsv("employee-reports.csv",[[brandName],["الموظف","من","إلى","الراتب الأساسي","العمولة","الخصومات","الصافي","الحالة"],...staffRows.map(p=>[p.employee?.full_name??"",p.period_start,p.period_end,p.base_salary,p.commission_amount,p.deductions,Number(p.base_salary)+Number(p.commission_amount)-Number(p.deductions),p.status])]):downloadCsv("brand-financial-report.csv",[[brandName],["التاريخ","الفرع","البند","التصنيف","القيمة"],...financeExpenses.map(e=>[e.expense_date,e.branches?.name??"",e.description,e.category,e.amount]),...financeTransactions.map(t=>[t.created_at.slice(0,10),branchAccounts.find(a=>a.id===t.cash_account_id)?.branches?.name??"الخزنة المركزية",t.description,t.transaction_type,(t.direction==="in"?1:-1)*Number(t.amount)])])}>استخراج التقرير</button>
   </div>
   {error&&<div className="notice error" role="alert">{error}</div>}
   {kind==="staff"?<>
