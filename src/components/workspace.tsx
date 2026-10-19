@@ -15,6 +15,7 @@ import CentralCash from "@/components/central-cash";
 import StaffHours from "@/components/staff-hours";
 import AccountSection from "@/components/account-section";
 import ReportsPanel from "@/components/reports-panel";
+import BrandLogoSettings from "@/components/brand-logo-settings";
 import { cachedRequestJson, clearOfflineActor } from "@/lib/offline-sync";
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
@@ -138,7 +139,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
-      {isOwner && <><Tab id="daily-registers" active={activeTab} setActive={setActiveTab}>اليوميات</Tab><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون والتقارير</Tab><Tab id="sales-reports" active={activeTab} setActive={setActiveTab}>تقارير المبيعات</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+      {isOwner && <><Tab id="daily-registers" active={activeTab} setActive={setActiveTab}>اليوميات</Tab><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون والتقارير</Tab><Tab id="sales-reports" active={activeTab} setActive={setActiveTab}>تقارير المبيعات</Tab><Tab id="brand-settings" active={activeTab} setActive={setActiveTab}>هوية البراند</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
     </nav>
     <Notice error={error} message={message}/>
     {activeTab === "overview" && <>
@@ -162,7 +163,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && activeTab === "finance" && <CentralCash />}
     {isOwner && activeTab === "finance" && <><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><ReportsPanel branches={branches} mode="finance" /></>}
     {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /><ReportsPanel branches={branches} mode="staff" /></>}
-    {isOwner && activeTab === "sales-reports" && <ReportsPanel branches={branches} mode="sales" />
+    {isOwner && activeTab === "sales-reports" && <ReportsPanel branches={branches} mode="sales" />}
+    {isOwner && activeTab === "brand-settings" && <BrandLogoSettings />
     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
     {isOwner && activeTab === "branches" && <>
