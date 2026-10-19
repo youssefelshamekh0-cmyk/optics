@@ -4,7 +4,7 @@
 - Branch: `merge/comprehensive-all-branches`
 - Starting point: `fix/delivery-modal-daily-branch-ui` / PR #20
 - The comprehensive branch preserves offline-first queue/idempotency, invoice/delivery handling, stock-take and inventory transfer foundations, central-cash and payroll improvements from PR #20.
-- Added the branch/staff/finance/sales report panel from `phase2/invoices-inventory-audit` and wired the reports into workspace tabs without replacing the newer offline-aware workspace.
+- Added the branch/staff/finance/sales report panel from `phase2/invoices-inventory-audit` and wired the reports into workspace tabs without replacing the newer offline-aware workspace.\n- Normalized `/api/account` to support both the existing account section and the newer employee panel, including weekly payroll, advances and leave requests.\n- Adapted the logo settings UI to the production `logo_data_url` API contract and its 1 MiB limit.\n- Connected customer-ordered lens receiving to the existing production `receive_lens_order` RPC and `supply_status` state, avoiding a call to the unrelated `receive_ordered_lenses` RPC.
 
 ## Branches reviewed
 - `feat/daily-all-branches-delivery-complete`
@@ -27,7 +27,7 @@
 - Do not apply the feature migrations wholesale as part of deployment: production and staging already have their migrations recorded, with slightly different migration timestamps/names.
 
 ## Validation still required before production cutover
-- GitHub Actions typecheck/build and dependency audit on this aggregate branch.
+- GitHub Actions typecheck/build and dependency audit on the latest aggregate commit (the preceding commit passed all three checks; a new run is in progress after lens receiving was corrected).
 - Authenticated preview smoke test for owner and seller roles (the existing preview requires login).
 - Runtime tests for offline sale/customer synchronization and retry idempotency.
 - Runtime tests for branch-scoped daily registers, central expenses/deposits, payroll payout idempotency, sale returns, stock takes/transfers and lens receiving.
