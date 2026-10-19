@@ -46,7 +46,7 @@ export default function BrandLogoSettings() {
         <label>اسم البراند<input type="text" required maxLength={100} value={brandName} onChange={(event) => { setBrandName(event.target.value); setError(""); setNotice(""); }} placeholder="اسم البراند الذي سيظهر في الفواتير والتقارير" /></label>
         <label>اختيار صورة PNG أو JPG أو WebP<input type="file" accept="image/png,image/jpeg,image/webp" onChange={chooseFile} /></label>
         <p className="footnote">الحد الأقصى 5 ميجابايت. تُحفظ الصورة في تخزين خاص ولا تكون متاحة للعامة.</p>
-        <button type="button" className="primary" disabled={busy || !file} onClick={() => void upload()}>{busy ? "جارٍ الحفظ…" : "حفظ هوية البراند"}</button>
+        <button type="button" className="primary" disabled={busy || !brandName.trim()} onClick={() => void upload()}>{busy ? "جارٍ الحفظ…" : "حفظ هوية البراند"}</button>
       </div>
     </div>
     {error && <div className="notice error" role="alert">{error}</div>}
