@@ -80,8 +80,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (error) {
     const message = error.message ?? "";
     if (/sale not found/i.test(message)) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
-    if (/exceeds sold quantity|exceeds net paid amount|invalid return|duplicate sale item|invalid refund cash account/i.test(message)) {
-      return Response.json({ error: "تعذر تنفيذ المرتجع: راجع الكميات والمبلغ المدفوع وخزنة الفرع" }, { status: 409 });
+    if (/exceeds sold quantity/i.test(message)) {
+      return Response.json({ error: "الكمية المطلوبة للمرتجع أكبر من الكمية المتبقية في الفاتورة." }, { status: 409 });
+    }
+    if (/exceeds net paid amount/i.test(message)) {
+      return Response.json({ error: "قيمة المرتجع أكبر من صافي المبلغ الذي دفعه العميل. راجع المدفوع والمرتجعات السابقة." }, { status: 409 });
+    }
+    if (/invalid refund cash account/i.test(message)) {
+      return Response.json({ error: "خزنة رد المبلغ غير تابعة لفرع الفاتورة أو غير مفعّلة. اختر خزنة نشطة من نفس الفرع." }, { status: 409 });
+    }
+    if (/invalid return|duplicate sale item/i.test(message)) {
+      return Response.json({ error: "بيانات المرتجع غير صحيحة أو يوجد بند مكرر." }, { status: 400 });
     }
     throw error;
   }
