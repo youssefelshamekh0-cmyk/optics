@@ -34,9 +34,12 @@ export async function POST(request: Request) {
 
   let form: FormData;
   try { form = await request.formData(); }
-  catch { return Response.json({ error: "ملف الصورة غير صالح" }, { status: 400 }); }
-  const file = form.get("logo");
-  if (!(file instanceof File) || file.size < 1 || file.size > MAX_BYTES || !MIME_EXT[file.type]) {
+  catch { return Response.json({ error: "البيانات غير صالحة" }, { status: 400 }); }
+  const brandName = String(form.get("brandName") ?? "").trim();
+  if (!brandName || brandName.length > 100) return Response.json({ error: "اكتب اسم البراند بحد أقصى 100 حرف" }, { status: 400 });
+  const candidate = form.get("logo");
+  const file = candidate instanceof File && candidate.size > 0 ? candidate : null;
+  if (file && (file.size > MAX_BYTES || !MIME_EXT[file.type])) {
     return Response.json({ error: "ارفع صورة PNG أو JPG أو WebP بحجم لا يتجاوز 5 ميجابايت" }, { status: 400 });
   }
 
@@ -45,23 +48,25 @@ export async function POST(request: Request) {
     .select("logo_path").eq("id", true).maybeSingle();
   if (readError) return Response.json({ error: "تعذر قراءة إعدادات البراند" }, { status: 500 });
 
-  const path = `brand-logo.${MIME_EXT[file.type]}`;
-  const { error: uploadError } = await admin.storage.from(BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), {
-    contentType: file.type, upsert: true, cacheControl: "3600",
-  });
-  if (uploadError) return Response.json({ error: "تعذر رفع صورة البراند" }, { status: 500 });
+  let path: string | null = existing?.logo_path ?? null;
+  if (file) {
+    path = `brand-logo.${MIME_EXT[file.type]}`;
+    const { error: uploadError } = await admin.storage.from(BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), {
+      contentType: file.type, upsert: true, cacheControl: "3600",
+    });
+    if (uploadError) return Response.json({ error: "تعذر رفع صورة البراند" }, { status: 500 });
+  }
 
   const { error: updateError } = await admin.from("brand_settings").upsert({
-    id: true, brand_name: "نظرة", logo_path: path, updated_by: user.id, updated_at: new Date().toISOString(),
+    id: true, brand_name: brandName, logo_path: path, updated_by: user.id, updated_at: new Date().toISOString(),
   }, { onConflict: "id" });
-  if (updateError) {
-    await admin.storage.from(BUCKET).remove([path]);
-    return Response.json({ error: "تم رفع الصورة لكن تعذر حفظ إعدادات البراند" }, { status: 500 });
+  if (updateError) return Response.json({ error: "تعذر حفظ إعدادات البراند" }, { status: 500 });
+
+  await audit(user.id, "brand.identity.update", "brand_settings", "true", { brandName, logoChanged: Boolean(file), logoSize: file?.size ?? null });
+  let logoUrl: string | null = null;
+  if (path) {
+    const { data: signed } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
+    logoUrl = signed?.signedUrl ?? null;
   }
-  if (existing?.logo_path && existing.logo_path !== path) {
-    await admin.storage.from(BUCKET).remove([existing.logo_path]);
-  }
-  await audit(user.id, "brand.logo.update", "brand_settings", "true", { contentType: file.type, size: file.size });
-  const { data: signed } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
-  return Response.json({ success: true, brandName: "نظرة", logoUrl: signed?.signedUrl ?? null });
+  return Response.json({ success: true, brandName, logoUrl });
 }
