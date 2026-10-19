@@ -12,6 +12,7 @@ const day=(d:Date)=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOStrin
 const startMonth=()=>day(new Date(new Date().getFullYear(),new Date().getMonth(),1));
 function downloadCsv(name:string,rows:(string|number)[][]){const csv="\uFEFF"+rows.map(r=>r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\r\n");const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
 export default function ReportsPanel({branches}:{branches:Branch[]}){
+ const printReport=()=>{document.body.classList.add("printing-reports");window.addEventListener("afterprint",()=>document.body.classList.remove("printing-reports"),{once:true});window.print();};
  const [kind,setKind]=useState<"staff"|"finance">("staff");
  const [from,setFrom]=useState(startMonth);const [to,setTo]=useState(()=>day(new Date()));
  const [branchId,setBranchId]=useState("");const [employeeId,setEmployeeId]=useState("");
@@ -31,7 +32,7 @@ export default function ReportsPanel({branches}:{branches:Branch[]}){
  const financeTransactions=useMemo(()=>transactions.filter(t=>t.created_at.slice(0,10)>=from&&t.created_at.slice(0,10)<=to&&accountIds.has(t.cash_account_id)),[transactions,from,to,accountIds]);
  const totalPayroll=staffRows.reduce((s,p)=>s+Number(p.base_salary)+Number(p.commission_amount)-Number(p.deductions),0);
  const totalExpenses=financeExpenses.reduce((s,e)=>s+Number(e.amount),0);
- return <section className="panel operations-panel">
+ return <section className="panel operations-panel reports-print-root">
   <div className="section-heading"><div><p className="eyebrow">تقارير الإدارة</p><h2>التقارير المالية للبراند والفروع</h2><p className="muted">تقارير الموظفين وكشوف الحساب، مع فلترة بالتاريخ والفرع.</p></div></div>
   <div className="ops-toolbar">
    <label>نوع التقرير<select value={kind} onChange={e=>setKind(e.target.value as "staff"|"finance")}><option value="staff">تقارير الموظفين وكشوف الحساب</option><option value="finance">التقارير المالية للبراند والفروع</option></select></label>
@@ -39,6 +40,7 @@ export default function ReportsPanel({branches}:{branches:Branch[]}){
    <label>النطاق<select value={branchId} onChange={e=>setBranchId(e.target.value)}><option value="">البراند بالكامل · كل الفروع</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
    {kind==="staff"&&<label>الموظف<select value={employeeId} onChange={e=>setEmployeeId(e.target.value)}><option value="">كل الموظفين</option>{employees.filter(e=>!branchId||e.branch_id===branchId).map(e=><option key={e.id} value={e.id}>{e.full_name}</option>)}</select></label>}
    <button type="button" className="row-action" onClick={()=>void load()} disabled={busy}>{busy?"جارٍ التحديث…":"تحديث"}</button>
+   <button type="button" className="row-action" onClick={printReport}>طباعة / حفظ PDF</button>
    <button type="button" className="row-action" onClick={()=>kind==="staff"?downloadCsv("employee-reports.csv",[["الموظف","من","إلى","الراتب الأساسي","العمولة","الخصومات","الصافي","الحالة"],...staffRows.map(p=>[p.employee?.full_name??"",p.period_start,p.period_end,p.base_salary,p.commission_amount,p.deductions,Number(p.base_salary)+Number(p.commission_amount)-Number(p.deductions),p.status])]):downloadCsv("brand-financial-report.csv",[["التاريخ","الفرع","البند","التصنيف","القيمة"],...financeExpenses.map(e=>[e.expense_date,e.branches?.name??"",e.description,e.category,e.amount]),...financeTransactions.map(t=>[t.created_at.slice(0,10),branchAccounts.find(a=>a.id===t.cash_account_id)?.branches?.name??"الخزنة المركزية",t.description,t.transaction_type,(t.direction==="in"?1:-1)*Number(t.amount)])])}>استخراج التقرير</button>
   </div>
   {error&&<div className="notice error" role="alert">{error}</div>}
@@ -50,6 +52,6 @@ export default function ReportsPanel({branches}:{branches:Branch[]}){
    <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الفرع</th><th>البند</th><th>التصنيف</th><th>القيمة</th></tr></thead><tbody>{financeExpenses.map(e=><tr key={e.id}><td>{e.expense_date}</td><td>{e.branches?.name??"—"}</td><td>{e.description}</td><td>{e.category}</td><td>{money(Number(e.amount))}</td></tr>)}{!financeExpenses.length&&<tr><td colSpan={5} className="table-empty">لا توجد مصروفات في الفترة المحددة.</td></tr>}</tbody></table></div>
    <h3 className="ops-subtitle">أرصدة الخزائن</h3><div className="table-wrap"><table><thead><tr><th>الخزنة</th><th>الفرع</th><th>الرصيد الحالي</th></tr></thead><tbody>{branchAccounts.map(a=><tr key={a.id}><td>{a.name}</td><td>{a.branches?.name??(a.branch_id?"—":"البراند")}</td><td><strong>{money(Number(a.balance??0))}</strong></td></tr>)}</tbody></table></div>
   </>}
-  <p className="footnote">التقرير يعرض البيانات المسجلة والمتاحة في النظام للفترة المحددة. تصدير CSV يفتح في Excel.</p>
+  <p className="footnote">التقرير يعرض البيانات المسجلة والمتاحة في النظام للفترة المحددة. استخدم «طباعة / حفظ PDF» ثم اختر Save as PDF من نافذة الطباعة.</p>
  </section>
 }
