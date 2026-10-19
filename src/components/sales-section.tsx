@@ -279,7 +279,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
               </form>}
             </div>}
           </div></td></tr>}</Fragment>)}
-        {filteredSales.length === 0 && <tr><td colSpan={8} className="table-empty">{search ? "لا توجد نتائج مطابقة." : "لا توجد فواتير في هذا الفرع بعد."}</td></tr>}
+        {loadingSales ? <tr><td colSpan={8} className="table-empty" role="status" aria-live="polite"><span className="inline-spinner" aria-hidden="true"/> جارٍ تحميل الفواتير…</td></tr> : filteredSales.length === 0 && <tr><td colSpan={8} className="table-empty">{search ? "لا توجد نتائج مطابقة. جرّب تغيير كلمات البحث." : "لا توجد فواتير في هذا الفرع بعد."}</td></tr>}
       </tbody></table></div>
     </>}
     <p className="footnote">السعر النهائي يُدخل مرة واحدة للفاتورة. أسعار البنود والعدسات مرجعية ومحفوظة كنسخة تاريخية، ومخزون المنتجات يُخصم عند اعتماد البيع.</p>
