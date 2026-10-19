@@ -1,6 +1,7 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { hoursLabel } from "@/components/shift-panel";
+import BrandLogoSettings from "@/components/brand-logo-settings";
 
 type Payroll = { id: string; period_start: string; period_end: string; base_salary: number; commission_amount: number; deductions: number; amount_paid: number; status: string };
 type Account = {
@@ -41,6 +42,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
 
   const s = data?.salary;
   return <div className="account-grid">
+    {isOwner && <BrandLogoSettings />}
     <section className="panel form-panel"><div className="section-heading"><div><p className="eyebrow">الأمان</p><h2>تغيير كلمة المرور</h2></div><span className="soft-icon">🔒</span></div>
       <form className="form-grid" onSubmit={changePassword}>
         <label className="wide">كلمة المرور الحالية<input type="password" autoComplete="current-password" required value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} /></label>
