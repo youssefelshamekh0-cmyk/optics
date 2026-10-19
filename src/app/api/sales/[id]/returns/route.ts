@@ -24,24 +24,30 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const admin = getSupabaseAdmin();
   const { data: sale, error: saleError } = await admin.from("sales")
-    .select("id,branch_id").eq("id", id).maybeSingle();
+    .select("id,branch_id,grand_total").eq("id", id).maybeSingle();
   if (saleError) throw saleError;
   if (!sale) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
   if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) {
     return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   }
-  const [{ data, error }, { data: returnedItems, error: returnedError }] = await Promise.all([
+  const [{ data, error }, { data: returnedItems, error: returnedError }, { data: paymentRows, error: paymentError }, { data: returnRows, error: returnError }] = await Promise.all([
     (admin as any).from("cash_accounts")
       .select("id,name,payment_method").eq("branch_id", sale.branch_id).eq("active", true).order("name"),
     (admin as any).from("sale_return_items")
       .select("sale_item_id,quantity,sale_returns!inner(sale_id)")
       .eq("sale_returns.sale_id", id),
+    (admin as any).from("sale_payments").select("amount").eq("sale_id", id),
+    (admin as any).from("sale_returns").select("refund_amount").eq("sale_id", id),
   ]);
   if (error) throw error;
   if (returnedError) throw returnedError;
+  if (paymentError) throw paymentError;
+  if (returnError) throw returnError;
   const returnedQuantities: Record<string, number> = {};
   for (const item of returnedItems ?? []) returnedQuantities[item.sale_item_id] = (returnedQuantities[item.sale_item_id] ?? 0) + Number(item.quantity);
-  return Response.json({ accounts: data ?? [], returnedQuantities });
+  const paidAmount = (paymentRows ?? []).reduce((sum: number, row: { amount: number }) => sum + Number(row.amount), 0);
+  const refundedAmount = (returnRows ?? []).reduce((sum: number, row: { refund_amount: number }) => sum + Number(row.refund_amount), 0);
+  return Response.json({ accounts: data ?? [], returnedQuantities, paidAmount, refundedAmount, refundableBalance: Math.max(0, Math.min(paidAmount, Number(sale.grand_total)) - refundedAmount) });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
