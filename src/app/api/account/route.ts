@@ -20,7 +20,7 @@ export async function GET() {
   if (branchRows.error) throw branchRows.error;
   const branchNames: string[] = (branchRows.data ?? []).map((b: any) => b.name);
   const base = { name: user.name, phone: user.phone, isOwner: user.roles.includes("super_admin"), week: { start: week.start, end: week.end } };
-  if (!employee || base.isOwner) return Response.json({ ...base, salary: null });
+  if (!employee || base.isOwner) return Response.json({ ...base, salary: null, profile: { name: user.name, phone: user.phone ?? "", isOwner: base.isOwner }, employee: null, week: { start: week.start, end: week.end, hoursSeconds: 0, shifts: 0 }, current: null, payroll: [], advances: [], leaves: [] });
 
   const [shifts, sales, payroll, advances, leaves] = await Promise.all([
     admin.from("seller_shifts").select("opened_at,closed_at").eq("user_id", user.id).gte("opened_at", week.from).lt("opened_at", week.to),
@@ -37,17 +37,25 @@ export async function GET() {
   const advancesPaid = advanceRows.filter((a) => a.status === "paid" && a.decided_at && a.decided_at >= week.from && a.decided_at < week.to).reduce((sum, a) => sum + Number(a.amount), 0);
   const advancesPending = advanceRows.filter((a) => a.status === "pending").reduce((sum, a) => sum + Number(a.amount), 0);
   const rate = Number(employee.commission_rate);
+  const payrollRows = (payroll.data ?? []).map((p: any) => {
+    const baseAmount = Number(p.base_salary);
+    const commission = Number(p.commission_amount);
+    const deductions = Number(p.deductions);
+    const paid = Number(p.amount_paid);
+    return { id: p.id, periodStart: p.period_start, periodEnd: p.period_end, base: baseAmount, commission, deductions, paid, remaining: Math.max(0, baseAmount + commission - deductions - paid), status: p.status };
+  });
+  const currentPayroll = payrollRows.find((p: any) => p.periodStart <= week.end && p.periodEnd >= week.start);
+  const baseAmount = Number(employee.base_salary);
+  const commission = Math.round((rate > 0 ? weekSales : 0) * rate) / 100;
   return Response.json({
     ...base,
-    salary: {
-      jobTitle: employee.job_title, branches: branchNames,
-      weeklySalary: Number(employee.base_salary), commissionRate: rate,
-      weekSeconds, weekSales: rate > 0 ? weekSales : 0, weekCommission: Math.round(weekSales * rate) / 100,
-      advancesPaid, advancesPending,
-      payroll: (payroll.data ?? []).map((p: any) => ({ ...p, base_salary: Number(p.base_salary), commission_amount: Number(p.commission_amount), deductions: Number(p.deductions), amount_paid: Number(p.amount_paid) })),
-      advances: advanceRows,
-      leaves: leaves.data ?? [],
-    },
+    profile: { name: user.name, phone: user.phone ?? "", isOwner: false },
+    employee: { jobTitle: employee.job_title ?? "موظف", branch: branchNames.join("، "), weeklySalary: baseAmount, commissionRate: rate },
+    week: { start: week.start, end: week.end, hoursSeconds: weekSeconds, shifts: (shifts.data ?? []).length },
+    current: { salesTotal: rate > 0 ? weekSales : 0, base: baseAmount, commission, deductions: currentPayroll?.deductions ?? 0, advancesPaid, advancesPending, salaryPaid: currentPayroll?.paid ?? 0, remaining: baseAmount + commission - (currentPayroll?.deductions ?? 0) - advancesPaid - (currentPayroll?.paid ?? 0), sheetIssued: Boolean(currentPayroll) },
+    payroll: payrollRows,
+    advances: advanceRows,
+    leaves: leaves.data ?? [],
   });
 }
 
