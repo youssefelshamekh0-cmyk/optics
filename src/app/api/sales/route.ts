@@ -148,9 +148,6 @@ export async function POST(request: Request) {
   if (input.saleType === "medical_glasses" && !items.some((item) => item.itemKind === "product" && item.productId && productById.get(item.productId)?.category === "frame")) return Response.json({ error: "اختر شنبرًا طبيًا من مخزون الفرع" }, { status: 400 });
   if (["sunglasses", "contact_lenses", "sports_glasses", "frame_only"].includes(input.saleType) && !items.some((item) => item.itemKind === "product")) return Response.json({ error: "اختر صنفًا من مخزون الفرع" }, { status: 400 });
   const referenceTotal = Math.round(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) * 100) / 100;
-  if (finalTotal > referenceTotal) {
-    return Response.json({ error: "الإجمالي النهائي لا يمكن أن يتجاوز إجمالي البنود المرجعي. راجع الأسعار والخصم." }, { status: 400 });
-  }
   const { data, error } = await admin.rpc("create_optics_sale", {
     p_branch_id: input.branchId, p_customer_id: input.customerId, p_created_by: user!.id,
     p_sale_type: input.saleType, p_items: items, p_prescription: prescription, p_final_total: finalTotal,
