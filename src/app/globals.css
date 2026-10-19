@@ -83,3 +83,36 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
   body.printing-reports .reports-print-root tr { break-inside: avoid; }
   @page { size: A4 landscape; margin: 10mm; }
 }
+
+
+/* Branch and team administration: clearer hierarchy, validation and responsive controls. */
+.admin-grid { align-items: stretch; }
+.admin-grid > .form-panel { min-width: 0; }
+.form-panel .section-heading { gap: 12px; }
+.form-panel .section-heading h2 { line-height: 1.5; }
+.form-grid > label { min-width: 0; }
+.form-grid input:focus-visible, .form-grid select:focus-visible, .form-grid textarea:focus-visible {
+  border-color: #75a99a; box-shadow: 0 0 0 3px #27685f18; background: #fff;
+}
+.form-grid input[aria-invalid="true"] { border-color: var(--red); }
+.form-grid fieldset { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fcfdfc; }
+.form-grid legend { padding: 0 5px; font-weight: 600; }
+.selection-count { color: var(--green); font-size: 10px; font-weight: 500; }
+.form-grid .checks { gap: 7px; }
+.form-grid .check { min-height: 34px; background: white; transition: border-color .15s, background .15s; }
+.form-grid .check:has(input:checked) { border-color: #b8d4c9; background: #f0f7f3; color: var(--green-deep); }
+.form-grid .check input { flex: 0 0 14px; }
+.form-grid > .primary { width: 100%; min-height: 43px; }
+.form-panel .footnote { line-height: 1.8; }
+.notice { line-height: 1.8; }
+@media (max-width: 800px) {
+  .admin-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-grid .form-panel { padding: 18px; }
+}
+@media (max-width: 560px) {
+  .admin-grid .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-grid .form-grid .wide { grid-column: auto; }
+  .admin-grid .form-grid fieldset { padding: 10px; }
+  .admin-grid .form-grid .check { flex: 1 1 calc(50% - 7px); min-width: 130px; }
+  .admin-grid .form-grid > .primary { width: 100%; }
+}
