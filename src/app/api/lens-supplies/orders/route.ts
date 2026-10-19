@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   const admin = getSupabaseAdmin() as any;
   const { data, error } = await admin.from("sale_items")
     .select("id,sale_id,item_name,quantity,technical_details,sales!inner(invoice_number,branch_id,delivery_status,created_at,customers(full_name,phone))")
-    .eq("item_kind", "prescription_lens").is("lens_received_at", null)
+    .eq("item_kind", "prescription_lens").eq("supply_status", "pending")
     .eq("sales.branch_id", branchId.data).neq("sales.delivery_status", "cancelled")
     .limit(1000);
   if (error) throw error;
@@ -67,39 +67,19 @@ export async function POST(request: Request) {
   if ((lines ?? []).length !== ids.length) return Response.json({ error: "إحدى العدسات غير موجودة" }, { status: 400 });
   if ((lines ?? []).some((l: any) => String(l.technical_details?.company ?? "") !== input.company)) return Response.json({ error: "كل العدسات في الفاتورة يجب أن تكون من نفس الشركة" }, { status: 400 });
 
-  // The owner types the whole supplier invoice amount; it is split evenly per lens in cents (remainder goes to the first lenses).
+  // Split the supplier invoice across the selected ordered lenses in cents; any remainder is assigned one cent at a time.
   const totalCents = Math.round(input.totalAmount * 100);
   const baseCents = Math.floor(totalCents / ids.length), extraCents = totalCents - baseCents * ids.length;
-  const costById = new Map(ids.map((id, i) => [id, (baseCents + (i < extraCents ? 1 : 0)) / 100]));
-  // The supply invoice keeps a catalogue product per lens type (created once, reused afterwards).
-  const productByName = new Map<string, string>();
-  const rpcItems: { saleItemId: string; productId: string; unitCost: number }[] = [];
-  for (const line of lines ?? []) {
-    const d = line.technical_details ?? {};
-    const name = `${input.company} ${d.lensTypeName ?? line.item_name}`.trim();
-    let productId = productByName.get(name.toLowerCase());
-    if (!productId) {
-      const lookup = admin.from("products").select("id").eq("active", true).in("category", ["lens", "contact_lens"]);
-      const existing = await (/[%_*\\]/.test(name) ? lookup.eq("name", name) : lookup.ilike("name", name)).limit(1).maybeSingle();
-      if (existing.error) throw existing.error;
-      if (existing.data) productId = existing.data.id;
-      else {
-        const created = await admin.from("products").insert({ name, category: "lens", created_by: user!.id }).select("id").single();
-        if (created.error) throw created.error;
-        productId = created.data.id as string;
-      }
-      productByName.set(name.toLowerCase(), productId!);
-    }
-    rpcItems.push({ saleItemId: line.id, productId: productId!, unitCost: Math.round((costById.get(line.id) ?? 0) * 100) / 100 });
-  }
+  const requirements = ids.map((saleItemId, i) => ({ saleItemId, unitCost: (baseCents + (i < extraCents ? 1 : 0)) / 100 }));
 
-  const { data, error: rpcError } = await admin.rpc("receive_ordered_lenses", {
+  const { data, error: rpcError } = await admin.rpc("receive_lens_order", {
     p_invoice_number: input.invoiceNumber, p_supplier_name: input.supplierName, p_supplier_phone: input.supplierPhone,
-    p_branch_id: input.branchId, p_received_at: input.receivedAt, p_items: rpcItems, p_created_by: user!.id,
+    p_branch_id: input.branchId, p_received_at: input.receivedAt,
+    p_items: [], p_requirements: requirements, p_created_by: user!.id,
   });
   if (rpcError?.code === "23505") return Response.json({ error: "رقم فاتورة المورد مسجل من قبل" }, { status: 409 });
-  if (rpcError?.message?.includes("lens item unavailable")) return Response.json({ error: "إحدى العدسات تم استلامها بالفعل أو فاتورتها ملغاة. حدّث القائمة وحاول مرة أخرى." }, { status: 409 });
+  if (rpcError?.message?.includes("lens requirement not available")) return Response.json({ error: "إحدى العدسات تم استلامها بالفعل أو لم تعد مطلوبة؛ حدّث القائمة وحاول مرة أخرى." }, { status: 409 });
   if (rpcError) throw rpcError;
-  await audit(user!.id, "lens_supply.receive_orders", "lens_supply", data, { branchId: input.branchId, company: input.company, invoiceNumber: input.invoiceNumber, lenses: rpcItems.length });
+  await audit(user!.id, "lens_supply.receive_orders", "lens_supply", data, { branchId: input.branchId, company: input.company, invoiceNumber: input.invoiceNumber, lenses: requirements.length });
   return Response.json({ supplyId: data }, { status: 201 });
 }
