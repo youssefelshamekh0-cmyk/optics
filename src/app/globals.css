@@ -116,3 +116,79 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
   .admin-grid .form-grid .check { flex: 1 1 calc(50% - 7px); min-width: 130px; }
   .admin-grid .form-grid > .primary { width: 100%; }
 }
+
+
+/* System-wide UX pass: predictable navigation, focus, feedback and mobile-safe data tables. */
+:root { color-scheme: light; scroll-padding-top: 18px; }
+html { scroll-behavior: smooth; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+button, input, select, textarea { touch-action: manipulation; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid #27685f42; outline-offset: 2px;
+}
+button:disabled { cursor: not-allowed; }
+.workspace-tabs {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin;
+  scrollbar-color: #c6d8cf transparent; padding: 10px 2px 12px;
+  scroll-snap-type: x proximity;
+}
+.workspace-tab {
+  flex: 0 0 auto; min-height: 40px; border: 1px solid transparent;
+  border-radius: 10px; scroll-snap-align: start; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.workspace-tab:hover { background: #eaf2ed; }
+.workspace-tab.selected { background: var(--green-deep); color: #fff; border-color: var(--green-deep); }
+.panel, .branch-card, .ops-form, .sale-form { min-width: 0; }
+.section-heading { gap: 12px; flex-wrap: wrap; }
+.section-heading > * { min-width: 0; }
+.notice { display: flex; align-items: flex-start; gap: 8px; line-height: 1.8; overflow-wrap: anywhere; }
+.notice.error { border: 1px solid #f1d5d1; }
+.notice.success { border: 1px solid #cfe7d5; }
+.empty { padding: 20px; text-align: center; line-height: 1.8; }
+.table-wrap { max-width: 100%; overflow: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; border-radius: 9px; }
+.table-wrap table { border-collapse: separate; border-spacing: 0; }
+.table-wrap thead th { position: sticky; top: 0; z-index: 1; background: #fbfcfb; }
+.table-wrap tbody tr:hover td { background: #fbfdfb; }
+.table-wrap td, .table-wrap th { overflow-wrap: anywhere; }
+.row-action { min-height: 34px; padding: 7px 11px; border: 1px solid #dce7e0; border-radius: 8px; background: #fff; color: var(--green-deep); font-size: 11px; white-space: nowrap; }
+.row-action:hover { background: #edf5f0; border-color: #b9d4c8; }
+.primary { min-height: 42px; transition: background .15s ease, transform .15s ease; }
+.primary:active:not(:disabled) { transform: translateY(1px); }
+input, select, textarea { max-width: 100%; }
+input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f1f3f1; }
+.ops-toolbar, .sales-toolbar, .customer-toolbar { flex-wrap: wrap; }
+.ops-toolbar > *, .sales-toolbar > *, .customer-toolbar > * { min-width: 0; }
+@media (min-width: 861px) {
+  .app-shell > .workspace-tabs { scrollbar-width: thin; }
+  .workspace-tabs .workspace-tab { min-height: 42px; }
+}
+@media (max-width: 860px) {
+  .app-shell { display: block; }
+  .app-shell > .workspace-tabs { position: sticky; top: 0; z-index: 20; margin: 0 -4px 12px; padding: 9px 4px; background: color-mix(in srgb, var(--paper) 94%, white); border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 640px) {
+  .topbar { gap: 10px; }
+  .top-actions { min-width: 0; gap: 9px; }
+  .user-pill > span:last-child { max-width: 95px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel { padding: 15px 12px; }
+  .section-heading { align-items: flex-start; }
+  .section-heading h2 { font-size: 16px; }
+  .ops-toolbar, .sales-toolbar, .customer-toolbar { gap: 9px; }
+  .ops-toolbar label, .sales-toolbar label, .customer-toolbar label { width: 100%; }
+  .ops-toolbar input, .ops-toolbar select, .sales-toolbar input, .sales-toolbar select, .customer-toolbar input, .customer-toolbar select { width: 100%; min-height: 42px; }
+  .ops-forms { gap: 12px; }
+  .ops-form { padding: 14px; }
+  .table-wrap { margin-inline: -2px; }
+  .table-wrap table { min-width: 640px; }
+  .sales-table { min-width: 860px; }
+  .customers-table { min-width: 700px; }
+  .table-wrap td, .table-wrap th { padding: 10px 9px; }
+  .row-action { min-height: 38px; }
+  .ops-inline-pay { align-items: stretch; }
+  .ops-inline-pay select, .ops-inline-pay input { min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
