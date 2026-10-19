@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCurrentUser, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { currentWeek } from "@/lib/week";
+import { todayCairo, weekRange } from "@/lib/week";
 
 const passwordSchema = z.object({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(8).max(200) });
 
@@ -12,7 +12,9 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "يلزم تسجيل الدخول" }, { status: 401 });
   const admin = getSupabaseAdmin() as any;
-  const week = currentWeek();
+  const week = weekRange(todayCairo());
+  const weekFrom = week.from.toISOString();
+  const weekTo = week.to.toISOString();
   const { data: employee, error } = await admin.from("employees").select("id,job_title,base_salary,commission_rate").eq("user_id", user.id).maybeSingle();
   if (error) throw error;
   // A seller can be registered in several branches; hours, sales and commission below count across all of them.
@@ -23,8 +25,8 @@ export async function GET() {
   if (!employee || base.isOwner) return Response.json({ ...base, salary: null, profile: { name: user.name, phone: user.phone ?? "", isOwner: base.isOwner }, employee: null, week: { start: week.start, end: week.end, hoursSeconds: 0, shifts: 0 }, current: null, payroll: [], advances: [], leaves: [] });
 
   const [shifts, sales, payroll, advances, leaves] = await Promise.all([
-    admin.from("seller_shifts").select("opened_at,closed_at").eq("user_id", user.id).gte("opened_at", week.from).lt("opened_at", week.to),
-    employee.commission_rate > 0 ? admin.from("sales").select("grand_total").eq("created_by", user.id).neq("delivery_status", "cancelled").gte("created_at", week.from).lt("created_at", week.to) : Promise.resolve({ data: [], error: null }),
+    admin.from("seller_shifts").select("opened_at,closed_at").eq("user_id", user.id).gte("opened_at", weekFrom).lt("opened_at", weekTo),
+    employee.commission_rate > 0 ? admin.from("sales").select("grand_total").eq("created_by", user.id).neq("delivery_status", "cancelled").gte("created_at", weekFrom).lt("created_at", weekTo) : Promise.resolve({ data: [], error: null }),
     admin.from("payroll_entries").select("id,period_start,period_end,base_salary,commission_amount,deductions,amount_paid,status").eq("employee_id", employee.id).order("period_start", { ascending: false }).limit(12),
     admin.from("payroll_advance_requests").select("id,amount,notes,status,created_at,decided_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30),
     admin.from("leave_requests").select("id,request_type,start_date,end_date,start_time,end_time,reason,status,decision_note,created_at,decided_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30),
@@ -34,7 +36,7 @@ export async function GET() {
   const weekSeconds = Math.round((shifts.data ?? []).reduce((sum: number, s: any) => sum + Math.max(0, ((s.closed_at ? Date.parse(s.closed_at) : now) - Date.parse(s.opened_at)) / 1000), 0));
   const weekSales = (sales.data ?? []).reduce((sum: number, s: any) => sum + Number(s.grand_total), 0);
   const advanceRows = (advances.data ?? []) as any[];
-  const advancesPaid = advanceRows.filter((a) => a.status === "paid" && a.decided_at && a.decided_at >= week.from && a.decided_at < week.to).reduce((sum, a) => sum + Number(a.amount), 0);
+  const advancesPaid = advanceRows.filter((a) => a.status === "paid" && a.decided_at && a.decided_at >= weekFrom && a.decided_at < weekTo).reduce((sum, a) => sum + Number(a.amount), 0);
   const advancesPending = advanceRows.filter((a) => a.status === "pending").reduce((sum, a) => sum + Number(a.amount), 0);
   const rate = Number(employee.commission_rate);
   const payrollRows = (payroll.data ?? []).map((p: any) => {
