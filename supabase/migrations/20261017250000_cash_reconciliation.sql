@@ -11,6 +11,30 @@ create table if not exists public.cash_reconciliations (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Upgrade an earlier staging reconciliation table without dropping its audit history.
+alter table public.cash_reconciliations
+  add column if not exists operation_id uuid,
+  add column if not exists request_fingerprint text,
+  add column if not exists expected_balance numeric(14,2),
+  add column if not exists created_by uuid references auth.users(id) on delete set null;
+
+update public.cash_reconciliations
+set operation_id = coalesce(operation_id, gen_random_uuid()),
+    expected_balance = coalesce(expected_balance, system_balance),
+    created_by = coalesce(created_by, reconciled_by),
+    request_fingerprint = coalesce(request_fingerprint,
+      pg_catalog.md5(pg_catalog.jsonb_build_object(
+        'legacyId', id, 'accountId', cash_account_id, 'countedBalance', counted_balance,
+        'systemBalance', system_balance, 'actor', reconciled_by, 'notes', notes
+      )::text));
+
+alter table public.cash_reconciliations
+  alter column operation_id set not null,
+  alter column request_fingerprint set not null,
+  alter column expected_balance set not null;
+create unique index if not exists cash_reconciliations_operation_id_key
+  on public.cash_reconciliations(operation_id);
+
 create index if not exists cash_reconciliations_account_created_idx
   on public.cash_reconciliations(cash_account_id,created_at desc);
 alter table public.cash_reconciliations enable row level security;
