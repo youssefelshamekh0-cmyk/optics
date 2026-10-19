@@ -19,7 +19,7 @@ const returnSchema = z.object({
 });
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  const { user, response } = await requirePermission("payments.record");
+  const { user, response } = await requirePermission("returns.manage");
   if (response) return response;
   const { id } = await context.params;
   const admin = getSupabaseAdmin();
@@ -51,7 +51,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const { user, response } = await requirePermission("payments.record");
+  const { user, response } = await requirePermission("returns.manage");
   if (response) return response;
   if (!(await requireSameOrigin(request))) {
     return Response.json({ error: "الطلب غير صالح" }, { status: 403 });
