@@ -9,7 +9,6 @@ import OperationsSection from "@/components/operations-section";
 import FinanceCharts from "@/components/finance-charts";
 import ShiftPanel, { ShiftBadge } from "@/components/shift-panel";
 import DailyOverview from "@/components/daily-overview";
-import DeliveriesPanel from "@/components/deliveries-panel";
 import { InstallButton } from "@/components/pwa";
 import CentralCash from "@/components/central-cash";
 import StaffHours from "@/components/staff-hours";
@@ -128,7 +127,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <nav className="workspace-tabs" aria-label="أقسام النظام" role="tablist">
       <Tab id="overview" active={activeTab} setActive={setActiveTab}>نظرة عامة</Tab>
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
-      {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
+      {(isOwner || user.permissions.includes("sales.create")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>نقطة البيع</Tab>}
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("payments.record") || user.permissions.includes("deliveries.complete") || user.permissions.includes("returns.manage")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>الفواتير</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
@@ -148,7 +147,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={false} canUpdateDelivery={false} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} view="sales" />}
     
-    {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("payments.record") || user.permissions.includes("deliveries.complete") || user.permissions.includes("returns.manage")) && activeTab === "deliveries" && <><SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={false} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={false} view="management" /><ReportsPanel branches={branches} mode="sales" /></>}
+    {(isOwner || user.permissions.includes("sales.read") || user.permissions.includes("payments.record") || user.permissions.includes("deliveries.complete") || user.permissions.includes("returns.manage")) && activeTab === "deliveries" && <><SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={false} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={false} canManageReturns={isOwner || user.permissions.includes("returns.manage")} view="management" /><ReportsPanel branches={branches} mode="sales" /></>}
     {!isOwner && activeTab === "seller-finance" && <OperationsSection module="seller-finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
     {isOwner && activeTab === "inventory" && <ProductsSection branches={branches} />}
     {isOwner && activeTab === "inventory" && <OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
