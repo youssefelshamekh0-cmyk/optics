@@ -2,7 +2,11 @@
 
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-function escapeHtml(value: unknown) { return String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch] ?? ch)); }
+function escapeHtml(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => {
+    switch (ch) { case "&": return "&amp;"; case "<": return "&lt;"; case ">": return "&gt;"; case '"': return "&quot;"; case "'": return "&#39;"; default: return ch; }
+  });
+}
 function printSaleInvoice(sale: Sale, brandName: string) {
   const frame = document.createElement("iframe");
   frame.style.position = "fixed"; frame.style.width = "0"; frame.style.height = "0"; frame.style.border = "0"; frame.style.right = "0"; frame.style.bottom = "0";
