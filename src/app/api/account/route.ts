@@ -51,6 +51,14 @@ export async function GET() {
   const commission = Math.round((rate > 0 ? weekSales : 0) * rate) / 100;
   return Response.json({
     ...base,
+    salary: {
+      jobTitle: employee.job_title, branches: branchNames,
+      weeklySalary: baseAmount, commissionRate: rate,
+      weekSeconds, weekSales: rate > 0 ? weekSales : 0, weekCommission: commission,
+      advancesPaid, advancesPending,
+      payroll: (payroll.data ?? []).map((p: any) => ({ ...p, base_salary: Number(p.base_salary), commission_amount: Number(p.commission_amount), deductions: Number(p.deductions), amount_paid: Number(p.amount_paid) })),
+      advances: advanceRows, leaves: leaves.data ?? [],
+    },
     profile: { name: user.name, phone: user.phone ?? "", isOwner: false },
     employee: { jobTitle: employee.job_title ?? "موظف", branch: branchNames.join("، "), weeklySalary: baseAmount, commissionRate: rate },
     week: { start: week.start, end: week.end, hoursSeconds: weekSeconds, shifts: (shifts.data ?? []).length },
