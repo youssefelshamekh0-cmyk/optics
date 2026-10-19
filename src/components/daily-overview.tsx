@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { clock, hoursLabel } from "@/components/shift-panel";
 
 type DayRow = { date: string; invoices: number; sales: number; income: number; expenses: number; variance: number | null; shifts: number; status: "deficit" | "surplus" | "balanced" | "open" | "unknown" };
-type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; due: number; status: string; created_at: string };
+type Invoice = { id: string; invoice_number: number; branch: string; customer: string; phone: string; seller: string; total: number; paid: number; dailyCollected: number; createdOnDay: boolean; due: number; status: string; created_at: string };
 type Daily = {
   role: "owner" | "seller"; date: string; today: string; branches: { id: string; name: string }[]; branchId: string;
   summary: { invoices: number; sales: number; collected: number; due: number; expenses: number; cashIn: number; cashOut: number };
@@ -19,11 +19,11 @@ const methodLabel: Record<string, string> = { cash: "نقدي", card: "بطاق�
 const time = (iso: string) => new Intl.DateTimeFormat("ar-EG", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 const shiftDate = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-export default function DailyOverview({ initialView = "list", onOpenDailyRegisters }: { initialView?: "list" | "detail"; onOpenDailyRegisters?: () => void }) {
+export default function DailyOverview({ initialView = "list", }: { initialView?: "list" | "detail" }) {
   const [data, setData] = useState<Daily | null>(null);
   const [view, setView] = useState<"list" | "detail">(initialView);
   const [days, setDays] = useState<DayRow[]>([]);
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useState("");
   const [date, setDate] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export default function DailyOverview({ initialView = "list", onOpenDailyRegiste
       const r = await fetch(`/api/daily?${qs}`, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تحميل اليومية");
-      setData(j); setError("");
+      setData(j); if (!branchId && j.branches?.length) setBranchId(j.branches[0].id); setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل اليومية"); } finally { setLoading(false); }
   }, [branchId, date]);
   useEffect(() => { void load(); }, [load]);
@@ -53,7 +53,7 @@ export default function DailyOverview({ initialView = "list", onOpenDailyRegiste
   if (!data) return <section className="panel"><p className="footnote">جارٍ تحميل اليومية…</p></section>;
   if (view === "list") return <section className="panel daily-panel">
     <div className="section-heading"><div><p className="eyebrow">اليوميات</p><h2>يوميات الفرع</h2></div>
-      <div className="daily-controls"><label>الفرع<select value={branchId} onChange={e => setBranchId(e.target.value)}><option value="all">كل الفروع</option>{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+      <div className="daily-controls"><label>الفرع<select value={branchId} onChange={e => setBranchId(e.target.value)}>{data.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
       <button type="button" className="row-action" onClick={() => { setDate(data.today); setView("detail"); }}>عرض اليومية الحالية</button></div></div>
     <p className="footnote">آخر 30 يومًا للاختيار الحالي. اضغط «عرض» لفتح تفاصيل اليوم وفواتيره ومصروفاته.</p>
     {error && <p className="notice error" role="alert">{error}</p>}
@@ -74,7 +74,7 @@ export default function DailyOverview({ initialView = "list", onOpenDailyRegiste
     <section className="panel daily-panel">
       <div className="section-heading"><div><p className="eyebrow">{isToday ? "اليومية · اليوم" : "اليومية"}</p><h2>{dayLabel}</h2></div>
         <div className="daily-controls">
-          <button type="button" className="row-action" onClick={() => setView("list")}>الرجوع لقائمة اليوميات</button>{onOpenDailyRegisters && <button type="button" className="row-action" onClick={onOpenDailyRegisters}>عرض اليوميات</button>}<label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="all">كل الفروع</option>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
+          <button type="button" className="row-action" onClick={() => setView("list")}>قائمة اليوميات</button><label>الفرع<select value={branchId} onChange={(e) => setBranchId(e.target.value)}>{data.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
           <div className="daily-date"><button type="button" className="row-action" aria-label="اليوم السابق" onClick={() => setDate(shiftDate(data.date, -1))}>›</button>
             <input type="date" aria-label="اختر يومًا" value={data.date} max={data.today} onChange={(e) => e.target.value && setDate(e.target.value)} />
             <button type="button" className="row-action" aria-label="اليوم التالي" disabled={isToday} onClick={() => setDate(shiftDate(data.date, 1) >= data.today ? "" : shiftDate(data.date, 1))}>‹</button>
@@ -93,9 +93,9 @@ export default function DailyOverview({ initialView = "list", onOpenDailyRegiste
       </div>
 
       <h3 className="ops-subtitle">فواتير اليوم</h3>
-      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th>{owner && <th>البائع</th>}<th>الفرع</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
-        {data.invoices.map((i) => <tr key={i.id} className={i.status === "cancelled" ? "row-cancelled" : ""}><td>#{i.invoice_number}<small>{time(i.created_at)}</small></td><td>{i.customer}<small>{i.phone}</small></td>{owner && <td>{i.seller}</td>}<td>{i.branch}</td><td>{money(i.total)}</td><td>{money(i.paid)}</td><td>{i.due > 0 ? <strong className="due">{money(i.due)}</strong> : "—"}</td><td>{statusLabel[i.status] ?? i.status}</td></tr>)}
-        {data.invoices.length === 0 && <tr><td colSpan={owner ? 8 : 7} className="table-empty">لا توجد فواتير في هذا اليوم.</td></tr>}
+      <div className="table-wrap"><table><thead><tr><th>الفاتورة</th><th>العميل</th>{owner && <th>البائع</th>}<th>الفرع</th><th>الإجمالي</th><th>المدفوع إجمالًا</th><th>تحصيل اليوم</th><th>المتبقي</th><th>الحالة</th></tr></thead><tbody>
+        {data.invoices.map((i) => <tr key={i.id} className={i.status === "cancelled" ? "row-cancelled" : ""}><td>#{i.invoice_number}<small>{time(i.created_at)}</small>{!i.createdOnDay && <small className="status active">فاتورة أقدم · تحصيل اليوم</small>}</td><td>{i.customer}<small>{i.phone}</small></td>{owner && <td>{i.seller}</td>}<td>{i.branch}</td><td>{money(i.total)}</td><td>{money(i.paid)}</td><td>{i.dailyCollected > 0 ? <strong className="good">{money(i.dailyCollected)}</strong> : "—"}</td><td>{i.due > 0 ? <strong className="due">{money(i.due)}</strong> : "—"}</td><td>{statusLabel[i.status] ?? i.status}</td></tr>)}
+        {data.invoices.length === 0 && <tr><td colSpan={owner ? 9 : 8} className="table-empty">لا توجد فواتير أو تحصيلات مسجلة في هذا اليوم.</td></tr>}
       </tbody></table></div>
 
       {owner && <>

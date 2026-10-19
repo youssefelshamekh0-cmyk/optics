@@ -6,7 +6,7 @@ const monthKey=(date:Date)=>date.toISOString().slice(0,7);
 const months=(count:number)=>{const now=new Date();return Array.from({length:count},(_,i)=>{const d=monthStart(now);d.setUTCMonth(d.getUTCMonth()-(count-1-i));return {key:monthKey(d),label:new Intl.DateTimeFormat("ar-EG",{month:"short"}).format(d)}})};
 async function fetchAll(query:any){const rows:any[]=[];for(let from=0;from<200000;from+=1000){const {data,error}=await query.range(from,from+999);if(error)throw error;rows.push(...(data??[]));if(!data||data.length<1000)break;}return rows;}
 export async function GET(){
- const user=await getCurrentUser();if(!user)return Response.json({error:"يلزم تسجيل الدخول"},{status:401});
+ const user=await getCurrentUser();if(!user)return Response.json({error:"يلزم تسجيل الدخول"},{status:401});if(!user.roles.includes("super_admin")&&user.branchIds.length===0)return Response.json({error:"الحساب غير مرتبط بفرع نشط"},{status:403});
  const admin=getSupabaseAdmin() as any;const isOwner=user.roles.includes("super_admin");const now=new Date();const periodStart=monthStart(now).toISOString();const chartStart=months(6)[0].key+"-01T00:00:00.000Z";
  const branchQuery=admin.from("branches").select("id,name,code,status").order("name");if(!isOwner)branchQuery.in("id",user.branchIds);
  const {data:branches,error:branchError}=await branchQuery;if(branchError)throw branchError;
