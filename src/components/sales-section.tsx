@@ -69,6 +69,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [alreadyReturned, setAlreadyReturned] = useState<Record<string, number>>({});
+  const [refundableBalance, setRefundableBalance] = useState(0);
   const [returnLoading, setReturnLoading] = useState(false);
 
   useEffect(() => { if (!branchId && availableBranches.length) setBranchId(availableBranches[0].id); }, [availableBranches, branchId]);
@@ -195,6 +196,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
       const result = await requestJson(`/api/sales/${sale.id}/returns`);
       setReturnAccounts(result.accounts ?? []);
       setAlreadyReturned(result.returnedQuantities ?? {});
+      setRefundableBalance(Number(result.refundableBalance ?? 0));
       setReturnCashAccountId(result.accounts?.[0]?.id ?? "");
       setReturnReason("");
       setReturnQuantities({});
@@ -215,6 +217,9 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     })) { setError("الكمية المختارة أكبر من الكمية المتبقية بعد المرتجعات السابقة"); return; }
     if (!selectedItems.length) { setError("اختر بندًا واحدًا على الأقل وحدد الكمية المرتجعة"); return; }
     if (!returnCashAccountId) { setError("اختر خزنة رد المبلغ"); return; }
+    const referenceTotal = sale.items.reduce((sum, item) => sum + Number(item.line_total), 0);
+    const estimatedRefund = selectedItems.reduce((sum, selected) => { const item = sale.items.find((row) => row.id === selected.saleItemId)!; const effectiveUnit = referenceTotal > 0 ? Number(item.unit_price) * Number(sale.grand_total) / referenceTotal : 0; return sum + Math.round(selected.quantity * effectiveUnit * 100) / 100; }, 0);
+    if (estimatedRefund > refundableBalance + 0.009) { setError(`قيمة المرتجع التقديرية ${money(estimatedRefund)} أكبر من الرصيد القابل للرد ${money(refundableBalance)}. قلل الكمية أو سجل دفعة العميل أولًا.`); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await requestJson(`/api/sales/${sale.id}/returns`, { method: "POST", body: JSON.stringify({
@@ -264,7 +269,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
                 {returnSaleId === sale.id ? "إلغاء المرتجع" : "إنشاء مرتجع"}
               </button>
               {returnSaleId === sale.id && <form className="payment-form sale-return-form" onSubmit={(event) => void submitReturn(event, sale)}>
-                <div><strong>مرتجع الفاتورة #{sale.invoice_number}</strong><p className="footnote">حدد الكميات المراد إرجاعها. المبلغ النهائي يعتمد على قواعد الخصم والمبالغ المدفوعة في قاعدة البيانات.</p></div>
+                <div><strong>مرتجع الفاتورة #{sale.invoice_number}</strong><p className="footnote">حدد الكميات المراد إرجاعها. لا يمكن رد أكثر من صافي ما دفعه العميل.</p><div className="return-balance"><span>المدفوع: <strong>{money(sale.paid_amount)}</strong></span><span>القابل للرد الآن: <strong>{money(refundableBalance)}</strong></span></div></div>
                 {sale.items.map((item) => <label key={item.id} className="return-item-row">
                   <span>{item.item_name} · المباع {item.quantity}</span>
                   <input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1"
