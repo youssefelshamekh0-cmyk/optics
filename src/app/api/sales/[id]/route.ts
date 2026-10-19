@@ -18,8 +18,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!existing) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
   if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(existing.branch_id)) return Response.json({ error: "ليس لديك وصول لهذه الفاتورة" }, { status: 403 });
   if (existing.delivery_status === "cancelled") return Response.json({ error: "الفاتورة ملغاة" }, { status: 400 });
-  const { error } = await admin.from("sales").update({ delivery_status: parsed.data.deliveryStatus, updated_at: new Date().toISOString() }).eq("id", id);
-  if (error) throw error;
+  const { error } = await (admin as any).rpc("change_sale_delivery", {
+    p_sale_id: id, p_status: parsed.data.deliveryStatus, p_actor: user!.id, p_notes: "",
+  });
+  if (error) {
+    if (String(error.message).includes("cancelled sale")) return Response.json({ error: "الفاتورة ملغاة" }, { status: 409 });
+    throw error;
+  }
   await audit(user!.id, "sale.delivery.update", "sale", id, { from: existing.delivery_status, to: parsed.data.deliveryStatus });
   return Response.json({ success: true });
 }

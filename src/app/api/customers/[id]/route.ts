@@ -19,9 +19,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!parsed.success) return Response.json({ error: "راجع اسم العميل وبياناته" }, { status: 400 });
   const { id } = await context.params;
   const admin = getSupabaseAdmin();
-  const { data: existing, error: lookupError } = await admin.from("customers").select("id").eq("id", id).maybeSingle();
+  const { data: existing, error: lookupError } = await admin.from("customers").select("id,created_by").eq("id", id).maybeSingle();
   if (lookupError) throw lookupError;
   if (!existing) return Response.json({ error: "العميل غير موجود" }, { status: 404 });
+  if (!user!.roles.includes("super_admin")) {
+    let hasBranchSale = false;
+    if (user!.branchIds.length) {
+      const { data: saleAccess, error: saleAccessError } = await admin.from("sales")
+        .select("id").eq("customer_id", id).in("branch_id", user!.branchIds).limit(1);
+      if (saleAccessError) throw saleAccessError;
+      hasBranchSale = Boolean(saleAccess?.length);
+    }
+    if (existing.created_by !== user!.id && !hasBranchSale) {
+      return Response.json({ error: "ليس لديك صلاحية تعديل بيانات هذا العميل" }, { status: 403 });
+    }
+  }
   const input = parsed.data;
   const phone = input.phone ? normalizeEgyptianPhone(input.phone)?.phone : null;
   if (input.phone && !phone) return Response.json({ error: "أدخل رقم موبايل مصري صحيح" }, { status: 400 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { cachedRequestJson } from "@/lib/offline-sync";
 
 type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
 type Customer = { id: string; full_name: string; phone: string | null; email: string | null };
@@ -22,11 +23,9 @@ const saleTypeLabels: Record<string, string> = { medical_glasses: "نظارة ط
 const statusLabels: Record<Sale["delivery_status"], string> = { pending: "جديد", processing: "قيد التجهيز", ready: "جاهز", delivered: "تم التسليم", cancelled: "ملغي" };
 const methodLabels: Record<string, string> = { cash: "نقدي", card: "بطاقة", instapay: "إنستاباي", other: "أخرى" };
 
+
 async function requestJson(url: string, init?: RequestInit) {
-  const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
-  return data;
+  return cachedRequestJson<any>(url, init);
 }
 
 const money = (value: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(value);
@@ -58,7 +57,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [paymentDrafts, setPaymentDrafts] = useState<Record<string, { amount: string; paymentMethod: string }>>({});
+  const [paymentDrafts, setPaymentDrafts] = useState<Record<string, { amount: string; paymentMethod: string; operationId: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -67,6 +66,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [returnCashAccountId, setReturnCashAccountId] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnOperationId, setReturnOperationId] = useState("");
   const [returnLoading, setReturnLoading] = useState(false);
 
   useEffect(() => { if (!branchId && availableBranches.length) setBranchId(availableBranches[0].id); }, [availableBranches, branchId]);
@@ -149,7 +149,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
           add: lensSelection.add, pupilDistance: lensSelection.pupilDistance } : null,
         finalTotal: Number(finalTotal), initialPayment: Number(initialPayment), paymentMethod, notes,
       }) });
-      setNotice(`تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
+      setNotice(result.queued ? "تم حفظ الفاتورة على هذا الجهاز، وهي معلّقة لحين عودة الإنترنت والتحقق من المخزون. لا تعتبر فاتورة معتمدة بعد." : `تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
       setItems([]); setSaleType("medical_glasses"); setLensSelection(emptyLensSelection); setLensQuote(null); setFinalTotal(""); setInitialPayment("0"); setPaymentMethod("cash"); setNotes(""); setCustomerId(""); setCustomerSearch(""); setSelectedCustomerLabel("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر إنشاء الفاتورة"); }
@@ -176,11 +176,12 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
 
   async function recordPayment(event: FormEvent, saleId: string) {
     event.preventDefault();
-    const payment = paymentDrafts[saleId] ?? { amount: "", paymentMethod: "cash" };
+    const payment = paymentDrafts[saleId] ?? { amount: "", paymentMethod: "cash", operationId: crypto.randomUUID() };
+    setPaymentDrafts((current) => ({ ...current, [saleId]: payment }));
     setBusy(true); setError(""); setNotice("");
     try {
-      await requestJson(`/api/sales/${saleId}/payments`, { method: "POST", body: JSON.stringify({ amount: Number(payment.amount), paymentMethod: payment.paymentMethod }) });
-      setPaymentDrafts((current) => ({ ...current, [saleId]: { ...payment, amount: "" } })); setNotice("تم تسجيل الدفعة"); await refresh();
+      await requestJson(`/api/sales/${saleId}/payments`, { method: "POST", body: JSON.stringify({ amount: Number(payment.amount), paymentMethod: payment.paymentMethod, operationId: payment.operationId }) });
+      setPaymentDrafts((current) => ({ ...current, [saleId]: { ...payment, amount: "", operationId: crypto.randomUUID() } })); setNotice("تم تسجيل الدفعة"); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تسجيل الدفعة"); }
     finally { setBusy(false); }
   }
@@ -194,6 +195,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
       setReturnCashAccountId(result.accounts?.[0]?.id ?? "");
       setReturnReason("");
       setReturnQuantities({});
+      setReturnOperationId(crypto.randomUUID());
       setReturnSaleId(sale.id);
       if (!result.accounts?.length) setError("لا توجد خزنة نشطة في فرع الفاتورة لرد المبلغ");
     } catch (cause) {
@@ -210,10 +212,10 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await requestJson(`/api/sales/${sale.id}/returns`, { method: "POST", body: JSON.stringify({
-        idempotencyKey: crypto.randomUUID(), cashAccountId: returnCashAccountId, reason: returnReason, items: selectedItems,
+        idempotencyKey: returnOperationId || crypto.randomUUID(), cashAccountId: returnCashAccountId, reason: returnReason, items: selectedItems,
       }) });
       setNotice(`تم تسجيل المرتجع بنجاح — مبلغ الرد ${money(Number(result.refundAmount))}`);
-      setReturnSaleId(null); setReturnQuantities({}); setReturnReason("");
+      setReturnSaleId(null); setReturnQuantities({}); setReturnReason(""); setReturnOperationId("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تسجيل المرتجع"); }
     finally { setBusy(false); }
@@ -250,7 +252,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
       <div className="table-wrap"><table className="sales-table"><thead><tr><th>الفاتورة</th><th>العميل</th><th>نوع البيع</th><th>المرجعي / النهائي</th><th>المدفوع</th><th>المتبقي</th><th>التسليم</th><th>التفاصيل</th></tr></thead><tbody>
         {filteredSales.map((sale) => <Fragment key={sale.id}><tr><td><strong>#{sale.invoice_number}</strong><small>{date(sale.created_at)}</small></td><td><strong>{sale.customer?.full_name ?? "عميل غير متاح"}</strong><small>{sale.branch?.name ?? ""}</small></td><td>{saleTypeLabels[sale.sale_type] ?? sale.sale_type}</td><td><small>مرجعي {money(Number(sale.reference_total ?? sale.total_amount))}</small><strong>{money(Number(sale.grand_total))}</strong></td><td>{money(sale.paid_amount)}</td><td className={sale.due_amount > 0 ? "balance-due" : "balance-paid"}>{money(sale.due_amount)}</td><td>{canUpdateDelivery ? <select aria-label={`حالة تسليم الفاتورة ${sale.invoice_number}`} className="status-select" value={sale.delivery_status} disabled={busy || sale.delivery_status === "cancelled"} onChange={(event) => void updateStatus(sale.id, event.target.value as Sale["delivery_status"])}>{(["pending", "processing", "ready", "delivered"] as const).map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}</select> : <span className="status active">{statusLabels[sale.delivery_status]}</span>}</td><td><button className="row-action" onClick={() => setExpandedId(expandedId === sale.id ? null : sale.id)}>{expandedId === sale.id ? "إخفاء" : "عرض"}</button></td></tr>
           {expandedId === sale.id && <tr key={`${sale.id}-details`}><td colSpan={8}><div className="sale-detail"><div><strong>الأسعار المرجعية للبنود</strong>{sale.items.map((item) => <p key={item.id}>{item.item_name} × {item.quantity} <span>{money(Number(item.line_total))}</span></p>)}<p><strong>إجمالي البيع النهائي</strong><span>{money(Number(sale.grand_total))}</span></p></div>{sale.prescription && Object.keys(sale.prescription).length > 0 && <div><strong>العدسات والوصفة</strong><p>{String(sale.prescription.lensCompany ?? "")} — {String(sale.prescription.lensTypeName ?? "")}</p><p>اليمنى: {String(sale.prescription.rightSphere ?? "—")} / {String(sale.prescription.rightCylinder ?? "—")} / {String(sale.prescription.rightAxis ?? "—")}</p><p>اليسرى: {String(sale.prescription.leftSphere ?? "—")} / {String(sale.prescription.leftCylinder ?? "—")} / {String(sale.prescription.leftAxis ?? "—")}</p><p>ADD: {String(sale.prescription.add ?? "—")} · PD: {String(sale.prescription.pupilDistance ?? "—")}</p></div>}{sale.notes && <div><strong>ملاحظات</strong><p>{sale.notes}</p></div>}<div><strong>الدفعات</strong>{sale.payments.map((payment) => <p key={payment.id}>{money(Number(payment.amount))} · {methodLabels[payment.payment_method] ?? payment.payment_method} <small>{date(payment.created_at)}</small></p>)}{sale.payments.length === 0 && <p>لم تسجل دفعات بعد.</p>}</div>
-            {canPay && sale.due_amount > 0 && <form className="payment-form" onSubmit={(event) => void recordPayment(event, sale.id)}><label>دفعة جديدة<input type="number" min="0.01" max={sale.due_amount} step="0.01" required value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash" }).amount} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { paymentMethod: "cash" }), amount: event.target.value } })} /></label><label>طريقة الدفع<select value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash" }).paymentMethod} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { amount: "" }), paymentMethod: event.target.value } })}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="instapay">إنستاباي</option><option value="other">أخرى</option></select></label><button className="primary" disabled={busy}>تسجيل الدفعة</button></form>}
+            {canPay && sale.due_amount > 0 && <form className="payment-form" onSubmit={(event) => void recordPayment(event, sale.id)}><label>دفعة جديدة<input type="number" min="0.01" max={sale.due_amount} step="0.01" required value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash", operationId: "" }).amount} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { paymentMethod: "cash", operationId: crypto.randomUUID() }), amount: event.target.value, operationId: crypto.randomUUID() } })} /></label><label>طريقة الدفع<select value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash", operationId: "" }).paymentMethod} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { amount: "", operationId: crypto.randomUUID() }), paymentMethod: event.target.value, operationId: crypto.randomUUID() } })}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="instapay">إنستاباي</option><option value="other">أخرى</option></select></label><button className="primary" disabled={busy}>تسجيل الدفعة</button></form>}
             {canPay && sale.delivery_status !== "cancelled" && <div className="sale-return-area">
               <button type="button" className="row-action" disabled={busy} onClick={() => void openReturnForm(sale)}>
                 {returnSaleId === sale.id ? "إلغاء المرتجع" : "إنشاء مرتجع"}
@@ -261,12 +263,12 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
                   <span>{item.item_name} · المباع {item.quantity}</span>
                   <input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1"
                     value={returnQuantities[item.id] ?? 0}
-                    onChange={(event) => setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) }))} />
+                    onChange={(event) => { setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) })); setReturnOperationId(crypto.randomUUID()); }} />
                 </label>)}
-                <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => setReturnCashAccountId(event.target.value)}>
+                <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => { setReturnCashAccountId(event.target.value); setReturnOperationId(crypto.randomUUID()); }}>
                   <option value="">اختر الخزنة</option>{returnAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {methodLabels[account.payment_method] ?? account.payment_method}</option>)}
                 </select></label>
-                <label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="اكتب سبب إرجاع الصنف" /></label>
+                <label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnOperationId(crypto.randomUUID()); }} placeholder="اكتب سبب إرجاع الصنف" /></label>
                 <button className="primary" disabled={busy || !returnCashAccountId || !returnReason.trim() || !sale.items.some((item) => Number(returnQuantities[item.id]) > 0)}>{busy ? "جارٍ تسجيل المرتجع…" : "تأكيد المرتجع ورد المبلغ"}</button>
               </form>}
             </div>}

@@ -71,6 +71,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   });
   if (error) {
     const message = error.message ?? "";
+    if (error.code === "23505" || /idempotency key reused with different return request/i.test(message)) return Response.json({ error: "معرّف المرتجع مستخدم بالفعل لعملية أخرى؛ راجع سجل المرتجعات قبل إعادة المحاولة" }, { status: 409 });
     if (/sale not found/i.test(message)) return Response.json({ error: "الفاتورة غير موجودة" }, { status: 404 });
     if (/exceeds sold quantity|exceeds net paid amount|invalid return|duplicate sale item|invalid refund cash account/i.test(message)) {
       return Response.json({ error: "تعذر تنفيذ المرتجع: راجع الكميات والمبلغ المدفوع وخزنة الفرع" }, { status: 409 });
