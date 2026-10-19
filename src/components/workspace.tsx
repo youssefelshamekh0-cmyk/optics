@@ -14,6 +14,7 @@ import { InstallButton } from "@/components/pwa";
 import CentralCash from "@/components/central-cash";
 import StaffHours from "@/components/staff-hours";
 import AccountSection from "@/components/account-section";
+import AccountPanel from "@/components/account-panel";
 import ReportsPanel from "@/components/reports-panel";
 import BrandLogoSettings from "@/components/brand-logo-settings";
 import { cachedRequestJson, clearOfflineActor } from "@/lib/offline-sync";
@@ -151,7 +152,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && <section className="panel"><div className="section-heading"><div><p className="eyebrow">الإدارة المركزية</p><h2>الفروع</h2></div><span className="count-badge">{branches.length} فرع</span></div>
       {branches.length ? <div className="branch-grid">{branches.map((branch) => <article className="branch-card" key={branch.id}><div className="branch-card-head"><span className="branch-icon">⌂</span><span className={`status ${branch.status === "ACTIVE" ? "active" : "inactive"}`}>{branch.status === "ACTIVE" ? "نشط" : "متوقف"}</span></div><h3>{branch.name}</h3><p className="branch-code">{branch.code}</p><div className="branch-meta"><span>{branch.address || "لم يضف عنوان"}</span><span>{branch._count?.userAccess ?? 0} مستخدم</span></div>{isOwner && <><button className="text-button" disabled={busy} onClick={() => editBranch(branch)}>تعديل البيانات<span>✎</span></button><button className="text-button" disabled={busy} onClick={() => void toggleBranch(branch)}>{branch.status === "ACTIVE" ? "إيقاف الفرع" : "تفعيل الفرع"}<span>←</span></button></>}</article>)}</div> : <div className="empty"><span>⌂</span><strong>لا توجد فروع مرتبطة بعد</strong><p>{isOwner ? "أضف أول فرع لبدء تنظيم العمل." : "اطلب من مالك البراند ربط حسابك بفرع."}</p></div>}
     </section>}</>}
-    {activeTab === "account" && <AccountSection isOwner={isOwner} />}
+    {activeTab === "account" && <><AccountSection isOwner={isOwner} /><AccountPanel /></>}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} />}
     {activeTab === "sales" && (isOwner || user.permissions.includes("sales.read") || user.permissions.includes("sales.create")) && <SalesSection branches={branches} branchIds={user.branchIds} isOwner={isOwner} canCreate={isOwner || user.permissions.includes("sales.create")} canPay={isOwner || user.permissions.includes("payments.record")} canUpdateDelivery={isOwner || user.permissions.includes("deliveries.complete")} canManageCustomers={isOwner || user.permissions.includes("customers.manage")} />}
     {(isOwner || user.permissions.includes("deliveries.complete")) && activeTab === "deliveries" && <DeliveriesPanel branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}
