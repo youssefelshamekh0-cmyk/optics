@@ -263,7 +263,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     if (!selectedItems.length) { setError("اختر بندًا واحدًا على الأقل وحدد الكمية المرتجعة"); return; }
     if (!returnCashAccountId) { setError("اختر خزنة رد المبلغ"); return; }
     const referenceTotal = sale.items.reduce((sum, item) => sum + Number(item.line_total), 0);
-    const estimatedRefund = selectedItems.reduce((sum, selected) => { const item = sale.items.find((row) => row.id === selected.saleItemId)!; const referenceUnit = Number(item.quantity) > 0 ? Number(item.line_total) / Number(item.quantity) : Number(item.unit_price); const effectiveUnit = referenceTotal > 0 ? referenceUnit * Number(sale.grand_total) / referenceTotal : 0; return sum + Math.round(selected.quantity * effectiveUnit * 100) / 100; }, 0);
+    const estimatedRefund = Math.round(selectedItems.reduce((sum, selected) => { const item = sale.items.find((row) => row.id === selected.saleItemId)!; const referenceUnit = Number(item.quantity) > 0 ? Number(item.line_total) / Number(item.quantity) : Number(item.unit_price); const effectiveUnit = referenceTotal > 0 ? referenceUnit * Number(sale.grand_total) / referenceTotal : 0; return sum + selected.quantity * effectiveUnit; }, 0) * 100) / 100;
     if (estimatedRefund > refundableBalance + 0.009) { setError(`قيمة المرتجع التقديرية ${money(estimatedRefund)} أكبر من الرصيد القابل للرد ${money(refundableBalance)}. قلل الكمية أو سجل دفعة العميل أولًا.`); return; }
     setBusy(true); setError(""); setNotice("");
     try {
