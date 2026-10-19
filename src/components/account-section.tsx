@@ -78,7 +78,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
     if (form.newPassword !== form.confirm) { setError("تأكيد كلمة المرور غير مطابق"); return; }
     setBusy(true);
     try {
-      const r = await fetch("/api/account", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }) });
+      const r = await fetch("/api/account/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تغيير كلمة المرور");
       setForm({ currentPassword: "", newPassword: "", confirm: "" }); setNotice("تم تغيير كلمة المرور. استخدم الجديدة في تسجيل الدخول القادم.");
