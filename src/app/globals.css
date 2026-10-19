@@ -57,3 +57,12 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
 /* My account: keep everything inside the phone screen */
 .account-grid>*{min-width:0}.account-grid .section-heading{flex-wrap:wrap;gap:8px}.account-grid .count-badge{max-width:100%}.account-grid .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.account-grid table{min-width:480px}.account-grid .form-grid>label,.account-grid .form-grid input{min-width:0;width:100%}
 @media(max-width:560px){.account-grid{gap:12px}.account-grid .form-panel{padding:17px 14px}.account-grid .form-grid{grid-template-columns:1fr}.account-grid .form-grid .wide{grid-column:auto}.account-grid .primary{width:100%}.account-kpis strong{font-size:17px}.workspace-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+
+/* Owner brand logo settings */
+.brand-logo-settings{display:grid;grid-template-columns:180px minmax(0,1fr);gap:18px;align-items:center}
+.brand-logo-preview{min-height:120px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:12px;background:#fbfcfb;color:var(--muted);font-size:12px;text-align:center;overflow:hidden}
+.brand-logo-preview img{display:block;max-width:100%;max-height:140px;object-fit:contain}
+.brand-logo-controls{display:grid;gap:10px;min-width:0}
+.brand-logo-controls label{display:grid;gap:7px;font-size:12px;color:var(--ink)}
+.brand-logo-controls input[type=file]{width:100%;min-width:0;font-size:12px}
+@media(max-width:560px){.brand-logo-settings{grid-template-columns:1fr}.brand-logo-preview{min-height:100px}.brand-logo-controls .primary{width:100%}}
