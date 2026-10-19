@@ -25,7 +25,6 @@ create table if not exists public.sale_return_items (
   unit_refund numeric(12,4) not null check (unit_refund >= 0),
   line_refund numeric(12,2) generated always as (quantity * unit_refund) stored
 );
-alter table public.sale_return_items alter column unit_refund type numeric(12,4) using unit_refund::numeric(12,4);
 create index if not exists sale_return_items_sale_item_idx on public.sale_return_items(sale_item_id);
 
 alter table public.cash_transactions drop constraint if exists cash_transactions_transaction_type_check;
