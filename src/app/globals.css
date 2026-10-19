@@ -66,3 +66,20 @@ strong.due,span.due{color:var(--red)}.row-cancelled{opacity:.55;text-decoration:
 .brand-logo-controls label{display:grid;gap:7px;font-size:12px;color:var(--ink)}
 .brand-logo-controls input[type=file]{width:100%;min-width:0;font-size:12px}
 @media(max-width:560px){.brand-logo-settings{grid-template-columns:1fr}.brand-logo-preview{min-height:100px}.brand-logo-controls .primary{width:100%}}
+
+
+/* Reports: print only the selected report so the exported PDF is clean. */
+@media print {
+  body.printing-reports * { visibility: hidden !important; }
+  body.printing-reports .reports-print-root,
+  body.printing-reports .reports-print-root * { visibility: visible !important; }
+  body.printing-reports .reports-print-root { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 8mm !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
+  body.printing-reports .reports-print-root button,
+  body.printing-reports .reports-print-root select,
+  body.printing-reports .reports-print-root input,
+  body.printing-reports .reports-print-root .ops-toolbar { display: none !important; }
+  body.printing-reports .reports-print-root .table-wrap { overflow: visible !important; }
+  body.printing-reports .reports-print-root table { width: 100% !important; border-collapse: collapse !important; }
+  body.printing-reports .reports-print-root tr { break-inside: avoid; }
+  @page { size: A4 landscape; margin: 10mm; }
+}
