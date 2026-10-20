@@ -724,3 +724,5 @@ button:disabled{cursor:not-allowed}
     border-radius: 10px;
   }
 }
+
+@media(max-width:520px){.prescription-details{min-width:0;max-width:100%;overflow:hidden}.prescription-grid{width:100%;min-width:0;grid-template-columns:46px repeat(3,minmax(0,1fr));gap:5px;align-items:center}.prescription-grid>*{min-width:0;max-width:100%}.prescription-grid strong{font-size:8px;line-height:1.35;overflow-wrap:anywhere}.prescription-grid input{width:100%;min-width:0;padding:5px 3px;font-size:10px}.prescription-grid label{min-width:0;font-size:9px}.prescription-grid label input{min-width:0}.prescription-grid label:nth-last-child(-n+2){grid-column:span 1}}
