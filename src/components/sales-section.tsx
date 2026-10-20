@@ -157,7 +157,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
         finalTotal: Number(finalTotal), initialPayment: Number(initialPayment), paymentMethod, notes,
       }) });
       setNotice(`تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
-      setItems([]); setSaleType("medical_glasses"); setLensSelection(emptyLensSelection); setLensQuote(null); setFinalTotal(""); setInitialPayment("0"); setPaymentMethod("cash"); setNotes(""); setCustomerId(""); setCustomerSearch(""); setSelectedCustomerLabel("");
+      setItems([]); setSaleType("medical_glasses"); setLensSelection(emptyLensSelection); setLensQuote(null); setFinalTotal(""); setInitialPayment("0"); setPaymentMethod("cash"); setNotes(""); setCustomerId(""); setCustomerSearch(""); setSelectedCustomerLabel(""); setPrescriptionNotice("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر إنشاء الفاتورة"); }
     finally { setBusy(false); }
@@ -171,7 +171,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     try {
       const result = await requestJson(`/api/sales?customerId=${encodeURIComponent(customer.id)}`);
       const previous = (result.sales as Sale[]).find((sale) => sale.prescription && Object.keys(sale.prescription).length > 0);
-      if (!previous?.prescription) { setPrescriptionNotice("אין مقاسات سابقة محفوظة لهذا العميل."); return; }
+      if (!previous?.prescription) { setPrescriptionNotice("لا توجد مقاسات سابقة محفوظة لهذا العميل."); return; }
       const p = previous.prescription;
       setLensSelection((current) => ({ ...current,
         lensTypeId: lensTypes.some((type) => type.id === String((p as any).lensTypeId ?? "")) ? String((p as any).lensTypeId) : current.lensTypeId,
