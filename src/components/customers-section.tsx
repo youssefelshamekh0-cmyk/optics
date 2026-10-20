@@ -105,7 +105,7 @@ export default function CustomersSection({ canManage, branches, branchIds, isOwn
         </div>
       </form>}
       <p className="footnote">سجل العملاء مشترك بين جميع الفروع، ويظهر أول 100 سجل. تُتاح البيانات لمن لديه صلاحية عرض العملاء.</p>
-      <CustomerCarePanel customers={customers} branches={branches} branchIds={branchIds} isOwner={isOwner} canManage={canManage} />
+      {canManage && <CustomerCarePanel customers={customers} branches={branches} branchIds={branchIds} isOwner={isOwner} canManage={canManage} />}
     </>
   </section>;
 }
