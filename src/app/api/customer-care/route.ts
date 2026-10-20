@@ -91,21 +91,23 @@ export async function POST(request: Request) {
       pupil_distance: input.pupilDistance ?? null, notes: input.notes || null, created_by: user!.id,
     };
   } else if (input.kind === "service") {
-    if (input.saleId) {
-      const { data: sale, error } = await admin.from("sales").select("id,customer_id,branch_id").eq("id", input.saleId).maybeSingle();
+    let linkedSale: { id: string; customer_id: string; branch_id: string } | null = null;
+    if (input.saleInvoiceNumber) {
+      const { data: sale, error } = await admin.from("sales").select("id,customer_id,branch_id").eq("invoice_number", input.saleInvoiceNumber).eq("customer_id", input.customerId).maybeSingle();
       if (error) throw error;
-      if (!sale || sale.customer_id !== input.customerId) return Response.json({ error: "الفاتورة لا تخص هذا العميل" }, { status: 400 });
+      if (!sale) return Response.json({ error: "رقم الفاتورة غير موجود لهذا العميل" }, { status: 400 });
+      linkedSale = sale;
       if (!user!.roles.includes("super_admin") && !user!.branchIds.includes(sale.branch_id)) return Response.json({ error: "ليس لديك وصول للفرع المرتبط بالفاتورة" }, { status: 403 });
     }
     table = "sale_service_records";
     values = {
-      customer_id: input.customerId, sale_id: input.saleId ?? null, branch_id: branch, service_type: input.serviceType, issue: input.issue,
+      customer_id: input.customerId, sale_id: linkedSale?.id ?? null, branch_id: linkedSale?.branch_id ?? branch, service_type: input.serviceType, issue: input.issue,
       warranty_until: input.warrantyUntil ?? null, expected_at: input.expectedAt ?? null, notes: input.notes || null, created_by: user!.id,
     };
   } else {
     table = "customer_reminders";
     values = {
-      customer_id: input.customerId, sale_id: input.saleId ?? null, branch_id: branch, reminder_type: input.reminderType,
+      customer_id: input.customerId, sale_id: null, branch_id: branch, reminder_type: input.reminderType,
       due_at: input.dueAt, message: input.message, created_by: user!.id,
     };
   }
