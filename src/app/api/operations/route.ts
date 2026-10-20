@@ -255,7 +255,20 @@ export async function POST(request:Request){
      if (owners.error) return [];
      return (owners.data ?? []).map((x:any)=>x.user_id as string);
    };
-   if (action === "timeOffRequest" && entityId) {
+   if (action === "purchase" && entityId) {
+     const productIds = [...new Set(parsed.data.items.map((item:any) => item.productId as string))];
+     if (productIds.length) {
+       const { data: stockRows } = await admin.from("branch_products").select("branch_id,product_id,quantity,low_stock_threshold").eq("branch_id",parsed.data.branchId).in("product_id",productIds);
+       for (const stock of stockRows ?? []) if (Number(stock.quantity) > Number(stock.low_stock_threshold ?? 5)) {
+         await admin.from("app_notifications").delete().eq("event_key","low_stock:" + stock.branch_id + ":" + stock.product_id).eq("entity_id",stock.product_id);
+       }
+     }
+   } else if (action === "adjust" && entityId) {
+     const { data: stock } = await admin.from("branch_products").select("branch_id,product_id,quantity,low_stock_threshold").eq("branch_id",parsed.data.branchId).eq("product_id",parsed.data.productId).maybeSingle();
+     if (stock && Number(stock.quantity) > Number(stock.low_stock_threshold ?? 5)) {
+       await admin.from("app_notifications").delete().eq("event_key","low_stock:" + stock.branch_id + ":" + stock.product_id).eq("entity_id",stock.product_id);
+     }
+   } else if (action === "timeOffRequest" && entityId) {
      const [owners, requestRow] = await Promise.all([
        ownerRecipients(),
        admin.from("staff_time_off_requests").select("request_type,reason,branches(name),user_profiles(full_name)").eq("id",entityId).maybeSingle()
