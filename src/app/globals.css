@@ -605,3 +605,33 @@ button:disabled{cursor:not-allowed}
   .mobile-invoice-detail-heading strong { font-size: 14px; }
   .mobile-invoice-detail-heading .row-action { flex: 0 0 auto; }
 }
+
+
+/* Desktop workspace uses the available width; remove legacy sidebar label and selected-tab accent. */
+@media (min-width: 861px) {
+  .app-shell {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    padding-inline: 26px;
+    margin-inline: 0;
+    grid-template-columns: 210px minmax(0, 1fr);
+    column-gap: 24px;
+  }
+  .app-shell > * { min-width: 0; }
+}
+.workspace-tabs::before,
+.workspace-tabs > .sidebar-brand,
+.workspace-tabs > .brand,
+.workspace-tabs > h1,
+.workspace-tabs > h2 {
+  display: none !important;
+  content: none !important;
+}
+.workspace-tab.selected::before,
+.workspace-tab.selected::after {
+  content: none !important;
+  display: none !important;
+}
+.connection { gap: 0 !important; }
+.connection > .dot { flex: 0 0 8px; }
