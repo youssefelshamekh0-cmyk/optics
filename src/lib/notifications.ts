@@ -17,7 +17,7 @@ function hkdfExtract(salt: Buffer, inputKey: Buffer) {
 }
 function hkdfExpand(prk: Buffer, info: Buffer, length: number) {
   let output = Buffer.alloc(0);
-  let previous = Buffer.alloc(0);
+  let previous: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   for (let counter = 1; output.length < length; counter++) {
     previous = createHmac("sha256", prk).update(Buffer.concat([previous, info, Buffer.from([counter])])).digest();
     output = Buffer.concat([output, previous]);
