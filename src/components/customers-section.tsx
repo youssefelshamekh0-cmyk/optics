@@ -86,6 +86,7 @@ export default function CustomersSection({ canManage, branches, branchIds, isOwn
     <div className="customer-toolbar">
       <label className="customer-search">بحث<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="اسم العميل أو رقم الموبايل" /></label>
     </div>
+    <CustomerCsvTools customers={customers} canManage={canManage} onImported={refresh} />
     {error && <div className="notice error" role="alert">{error}</div>}
     {notice && <div className="notice success" role="status">{notice}</div>}
     <>
