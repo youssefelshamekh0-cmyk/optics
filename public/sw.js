@@ -62,3 +62,27 @@ self.addEventListener("fetch", (event) => {
     })));
   }
 });
+
+
+self.addEventListener("push", (event) => {
+  let payload = { title: "نظرة", body: "لديك إشعار جديد", href: "/dashboard" };
+  try { if (event.data) payload = { ...payload, ...event.data.json() }; } catch { if (event.data) payload.body = event.data.text(); }
+  event.waitUntil(self.registration.showNotification(payload.title || "نظرة", {
+    body: payload.body || "لديك إشعار جديد",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: { href: payload.href || "/dashboard" },
+    dir: "rtl",
+    lang: "ar",
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const href = event.notification.data?.href || "/dashboard";
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+    if (existing) { existing.navigate(href); return existing.focus(); }
+    return self.clients.openWindow(href);
+  }));
+});
