@@ -184,13 +184,16 @@ export async function POST(request: Request) {
         const ownerRows = role.data ? await admin.from("user_roles").select("user_id").eq("role_id", role.data.id) : { data: [] };
         const owners = (ownerRows.data ?? []).map((row: any) => row.user_id as string);
         for (const stock of lowRows ?? []) {
+          const lowStockEvent = "low_stock:" + stock.branch_id + ":" + stock.product_id;
           if (Number(stock.quantity) <= Number(stock.low_stock_threshold ?? 5)) {
             await notifyUsers(owners, user!.id, {
-              eventKey: "low_stock:" + stock.branch_id + ":" + stock.product_id,
+              eventKey: lowStockEvent,
               title: "تنبيه نقص مخزون",
               body: (stock.products?.name ?? "صنف") + " · " + (stock.branches?.name ?? "الفرع") + " · المتبقي " + Number(stock.quantity),
               href: "/dashboard", entityType: "branch_product", entityId: stock.product_id,
             });
+          } else {
+            await admin.from("app_notifications").delete().eq("event_key", lowStockEvent).eq("entity_id", stock.product_id);
           }
         }
       }
