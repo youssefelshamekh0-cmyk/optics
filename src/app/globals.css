@@ -801,3 +801,30 @@ button:disabled{cursor:not-allowed}
   .sale-form label { font-size: 12px; }
   .sale-form input, .sale-form select, .sale-form textarea { font-size: 16px; }
 }
+
+
+/* Final mobile prescription layout and logout visibility correction. */
+@media (max-width: 640px) {
+  .prescription-details { overflow: visible; }
+  .prescription-grid {
+    display: grid !important;
+    grid-template-columns: minmax(44px, .72fr) repeat(3, minmax(0, 1fr)) !important;
+    gap: 7px !important; width: 100% !important; min-width: 0 !important;
+    overflow: visible !important; align-items: center;
+  }
+  .prescription-grid > * { min-width: 0 !important; max-width: 100% !important; box-sizing: border-box; }
+  .prescription-grid > strong { font-size: clamp(8px, 2.3vw, 10px) !important; line-height: 1.35; text-align: center; overflow-wrap: anywhere; }
+  .prescription-grid > input, .prescription-grid > label input {
+    width: 100% !important; min-width: 0 !important; max-width: 100% !important;
+    height: 42px; min-height: 42px !important; padding: 5px 3px !important;
+    text-align: center; font-size: 14px !important;
+  }
+  .prescription-grid > label { min-width: 0; display: flex !important; flex-direction: column; gap: 5px; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+  .app-shell > .topbar > .top-actions > :nth-child(4) { display: flex !important; }
+  .app-shell > .topbar .logout-button {
+    display: inline-flex !important; visibility: visible !important; opacity: 1 !important;
+    flex: 0 0 36px !important; width: 36px !important; min-width: 36px !important;
+    height: 36px !important; min-height: 36px !important; align-items: center;
+    justify-content: center; position: relative; z-index: 5;
+  }
+}
