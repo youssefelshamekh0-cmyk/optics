@@ -14,7 +14,15 @@ export async function notifyUsers(userIds: string[], actorUserId: string | null,
   if (!recipients.length) return;
   const admin = getSupabaseAdmin() as any;
   const href = payload.href || "/dashboard";
-  const rows = recipients.map((recipient_user_id) => ({
+  let freshRecipients = recipients;
+  if (payload.entityId) {
+    const { data: existing } = await admin.from("app_notifications").select("recipient_user_id")
+      .eq("event_key", payload.eventKey).eq("entity_id", payload.entityId).in("recipient_user_id", recipients);
+    const alreadyNotified = new Set((existing ?? []).map((row: any) => row.recipient_user_id));
+    freshRecipients = recipients.filter((id) => !alreadyNotified.has(id));
+  }
+  if (!freshRecipients.length) return;
+  const rows = freshRecipients.map((recipient_user_id) => ({
     recipient_user_id, actor_user_id: actorUserId, event_key: payload.eventKey,
     title: payload.title, body: payload.body, href,
     entity_type: payload.entityType ?? null, entity_id: payload.entityId ?? null,
@@ -28,7 +36,7 @@ export async function notifyUsers(userIds: string[], actorUserId: string | null,
     const webpush: any = await import("web-push");
     webpush.default.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:admin@optics.example", publicKey, privateKey);
     const { data: subscriptions, error } = await admin.from("push_subscriptions")
-      .select("id,user_id,endpoint,p256dh,auth").in("user_id", recipients);
+      .select("id,user_id,endpoint,p256dh,auth").in("user_id", freshRecipients);
     if (error) throw error;
     await Promise.all((subscriptions ?? []).map(async (sub: any) => {
       try {
