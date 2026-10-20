@@ -19,6 +19,8 @@ export default function SupplierLedgerSection({ isOwner }: { isOwner: boolean })
   const [accounts,setAccounts] = useState<Account[]>([]);
   const [entries,setEntries] = useState<Entry[]>([]);
   const [supplierId,setSupplierId] = useState("");
+  const [supplierName,setSupplierName] = useState("");
+  const [supplierPhone,setSupplierPhone] = useState("");
   const [branchId,setBranchId] = useState("");
   const [type,setType] = useState<"opening_debt"|"payment"|"adjustment">("opening_debt");
   const [amount,setAmount] = useState("");
@@ -35,6 +37,15 @@ export default function SupplierLedgerSection({ isOwner }: { isOwner: boolean })
   },[]);
   useEffect(()=>{void load()},[load]);
   const filtered = suppliers.filter(s=>!search||s.name.toLowerCase().includes(search.toLowerCase())||(s.phone??"").includes(search));
+  async function createSupplier(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await api("/api/suppliers", { method: "POST", body: JSON.stringify({ name: supplierName, phone: supplierPhone }) });
+      await load(); setSupplierId(result.supplier.id); setSupplierName(""); setSupplierPhone("");
+      setNotice("تمت إضافة المورد ويمكن تسجيل مديونيته الآن.");
+    } catch(e) { setError(e instanceof Error?e.message:"تعذر إضافة المورد"); }
+    finally { setBusy(false); }
+  }
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError(""); setNotice("");
     try {
@@ -49,6 +60,14 @@ export default function SupplierLedgerSection({ isOwner }: { isOwner: boolean })
     <div className="section-heading"><div><p className="eyebrow">حسابات الموردين</p><h2>المديونيات والمشتريات الآجلة</h2></div></div>
     {error&&<div className="notice error" role="alert">{error}</div>}{notice&&<div className="notice success" role="status">{notice}</div>}
     <div className="account-kpis" style={{marginBottom:16}}><article><span>إجمالي المستحق للموردين</span><strong>{money(totalDue)}</strong></article><article><span>أرصدة دائنة لصالحنا</span><strong>{money(totalCredit)}</strong></article><article><span>عدد الموردين</span><strong>{suppliers.length}</strong></article></div>
+    <form className="ops-form" onSubmit={createSupplier} style={{marginBottom:16}}>
+      <h3>إضافة مورد جديد</h3>
+      <div className="ops-fields">
+        <label>اسم الشركة أو المورد<input required minLength={2} maxLength={160} value={supplierName} onChange={e=>setSupplierName(e.target.value)} placeholder="اسم المورد"/></label>
+        <label>رقم الهاتف<input type="tel" maxLength={40} value={supplierPhone} onChange={e=>setSupplierPhone(e.target.value)} placeholder="اختياري"/></label>
+      </div>
+      <button className="row-action" disabled={busy||supplierName.trim().length<2}>حفظ المورد</button>
+    </form>
     <form className="ops-form" onSubmit={submit}>
       <h3>تسجيل حركة مديونية</h3>
       <div className="ops-fields">
