@@ -33,11 +33,16 @@ export async function POST(request: Request) {
   if (pending.error) throw pending.error;
   if ((pending.count ?? 0) >= 5) return Response.json({ error: "لديك طلبات معلقة كثيرة؛ انتظر مراجعة المالك" }, { status: 429 });
 
+  const branchId = employee.data?.branch_id && user.branchIds.includes(employee.data.branch_id)
+    ? employee.data.branch_id
+    : user.branchIds[0];
+  if (!branchId) return Response.json({ error: "حسابك غير مرتبط بفرع؛ تواصل مع المالك لتصحيح بيانات الموظف" }, { status: 409 });
+
   const { data, error } = await admin.from("leave_requests").insert({
-    user_id: user.id, employee_id: employee.data?.id ?? null, branch_id: employee.data?.branch_id ?? user.branchIds[0] ?? null,
+    user_id: user.id, employee_id: employee.data?.id ?? null, branch_id: branchId,
     request_type: input.type, start_date: input.startDate, end_date: endDate,
     start_time: input.type === "permission" ? input.startTime : null, end_time: input.type === "permission" ? input.endTime : null,
-    reason: input.reason,
+    reason: input.reason, created_by: user.id,
   }).select("id").single();
   if (error) throw error;
   await audit(user.id, `leave.${input.type}.request`, "leave_request", data.id, {});
