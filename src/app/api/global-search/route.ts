@@ -40,7 +40,7 @@ export async function GET(request: Request) {
 
     let invoices: any[] = [];
     if (canReadSales) {
-      const queries: Promise<any>[] = [];
+      const queries: any[] = [];
       if (/^\d+$/.test(term)) {
         let invoiceQuery = admin.from("sales").select("id,invoice_number,branch_id,customer_id,grand_total,delivery_status,created_at,customers(full_name),branches(name)").eq("invoice_number", Number(term)).limit(8);
         if (!owner) invoiceQuery = invoiceQuery.in("branch_id", user.branchIds);
