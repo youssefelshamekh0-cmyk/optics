@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const admin=getSupabaseAdmin() as any;
     const [accounts,expenses,requests,timeOff]=await Promise.all([
       admin.from("cash_accounts").select("id,branch_id,name,payment_method,active").eq("branch_id",branchId).eq("active",true).order("name"),
-      admin.from("expenses").select("id,description,category,amount,expense_date,status,cash_accounts(name)").eq("branch_id",branchId).eq("created_by",user.id).order("expense_date",{ascending:false}).limit(50),
+      admin.from("expenses").select("id,description,category,amount,expense_date,status,cash_accounts(name)").eq("branch_id",branchId).order("expense_date",{ascending:false}).limit(50),
       admin.from("payroll_advance_requests").select("id,amount,notes,status,created_at,decided_at").eq("user_id",user.id).order("created_at",{ascending:false}).limit(50),
       admin.from("staff_time_off_requests").select("id,request_type,starts_at,ends_at,reason,status,reviewer_note,created_at").eq("user_id",user.id).order("created_at",{ascending:false}).limit(50),
     ]);if(accounts.error||expenses.error||requests.error||timeOff.error)throw accounts.error??expenses.error??requests.error??timeOff.error;return Response.json({accounts:accounts.data??[],expenses:expenses.data??[],requests:requests.data??[],timeOffRequests:timeOff.data??[]});
