@@ -74,7 +74,7 @@ async function sendWebPush(subscription: { endpoint: string; p256dh: string; aut
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
     },
-    body,
+    body: body as unknown as BodyInit,
   });
   if (!response.ok) {
     const error: any = new Error("Web push provider returned " + response.status);
