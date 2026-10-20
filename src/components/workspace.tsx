@@ -65,10 +65,14 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
   useEffect(() => {
     if (!isOwner) return;
     let active = true;
-    fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (active && j && !j.error) { setBrandLogo(j.logoDataUrl ?? null); setBrandName(typeof j.brandName === "string" && j.brandName.trim() ? j.brandName.trim() : "نظرة"); }
-    }).catch(() => {});
-    return () => { active = false; };
+    const loadBrandSettings = () => {
+      fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+        if (active && j && !j.error) { setBrandLogo(j.logoDataUrl ?? null); setBrandName(typeof j.brandName === "string" && j.brandName.trim() ? j.brandName.trim() : "نظرة"); }
+      }).catch(() => {});
+    };
+    loadBrandSettings();
+    window.addEventListener("brand-settings:changed", loadBrandSettings);
+    return () => { active = false; window.removeEventListener("brand-settings:changed", loadBrandSettings); };
   }, [isOwner]);
 
   const refresh = useCallback(async () => {
