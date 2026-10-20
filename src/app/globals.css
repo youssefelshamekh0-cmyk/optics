@@ -691,3 +691,36 @@ button:disabled{cursor:not-allowed}
   .app-shell > .topbar > .top-actions { gap: 3px; }
   .app-shell > .topbar > .top-actions > button.quiet:not(.icon-action) { min-width: 36px; padding-inline: 5px; font-size: 10px; }
 }
+
+
+/* Header icon actions: compact logout glyph and consistent notification icon sizing. */
+.topbar .logout-button,
+.topbar .notification-button {
+  display: inline-flex;
+  flex: 0 0 40px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+}
+.topbar .logout-button svg,
+.topbar .notification-button svg { display: block; flex: 0 0 auto; }
+.topbar .logout-button:disabled { opacity: .55; }
+@media (max-width: 640px) {
+  .app-shell > .topbar .logout-button,
+  .app-shell > .topbar .notification-button {
+    flex-basis: 32px;
+    width: 32px;
+    min-width: 32px;
+    height: 36px;
+    min-height: 36px;
+    border-radius: 10px;
+  }
+}
