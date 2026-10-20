@@ -14,13 +14,13 @@ const prescriptionSchema = z.object({
   pupilDistance: z.number().finite().min(0).max(100).nullable().optional(), notes: z.string().trim().max(2000).optional().default(""),
 });
 const serviceSchema = z.object({
-  kind: z.literal("service"), customerId: id, branchId: id.nullable().optional(), saleId: id.nullable().optional(),
+  kind: z.literal("service"), customerId: id, branchId: id.nullable().optional(), saleInvoiceNumber: z.number().int().positive().nullable().optional(),
   serviceType: z.enum(["warranty","repair","maintenance","replacement"]), issue: z.string().trim().min(3).max(1000),
   warrantyUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   expectedAt: z.string().datetime().nullable().optional(), notes: z.string().trim().max(2000).optional().default(""),
 });
 const reminderSchema = z.object({
-  kind: z.literal("reminder"), customerId: id, branchId: id.nullable().optional(), saleId: id.nullable().optional(),
+  kind: z.literal("reminder"), customerId: id, branchId: id.nullable().optional(),
   reminderType: z.enum(["follow_up","annual_exam","ready_order","payment_followup","warranty_followup"]),
   dueAt: z.string().datetime(), message: z.string().trim().min(2).max(1000),
 });
