@@ -273,3 +273,12 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
 .return-modal .return-balance{display:flex;flex-wrap:wrap;gap:10px 22px;padding:12px;border-radius:10px;background:var(--mint)}
 .brand-logo-controls>label:first-child input[type=text]{width:100%;margin-top:7px}
 @media(max-width:640px){.return-modal-backdrop{padding:8px;align-items:flex-end}.return-modal{padding:16px;border-radius:18px 18px 10px 10px;max-height:92vh}.return-modal-heading h3{font-size:16px}.top-actions{gap:10px}}
+
+/* Invoice return and return-history dialogs */
+.return-modal-backdrop{position:fixed;inset:0;z-index:1200;background:rgba(15,28,23,.52);display:flex;align-items:center;justify-content:center;padding:20px;}
+.return-modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:var(--surface,#fff);border:1px solid var(--line,#dce9e1);border-radius:16px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.24);}
+.return-modal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;}
+.return-modal-heading h3{margin:0;}
+.return-history-modal{width:min(1000px,100%);}
+.return-history-modal .table-wrap{max-width:100%;overflow:auto;}
+@media(max-width:640px){.return-modal-backdrop{padding:8px;align-items:flex-end}.return-modal{padding:14px;border-radius:18px 18px 10px 10px;max-height:92vh}.return-modal-heading{align-items:flex-start}}

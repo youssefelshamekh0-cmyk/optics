@@ -16,6 +16,9 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [brandLogo, setBrandLogo] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState("نظرة");
+  const [brandNameDraft, setBrandNameDraft] = useState("نظرة");
+  const [brandNameBusy, setBrandNameBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const [logoNotice, setLogoNotice] = useState("");
   const [logoError, setLogoError] = useState("");
@@ -25,8 +28,24 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر تحميل شعار البراند");
       setBrandLogo(j.logoDataUrl ?? null);
+      const savedName = typeof j.brandName === "string" && j.brandName.trim() ? j.brandName.trim() : "نظرة";
+      setBrandName(savedName); setBrandNameDraft(savedName);
     }).catch((e) => setLogoError(e instanceof Error ? e.message : "تعذر تحميل شعار البراند"));
   }, [isOwner]);
+
+  async function saveBrandName(event: FormEvent) {
+    event.preventDefault(); setLogoError(""); setLogoNotice(""); setBrandNameBusy(true);
+    const value = brandNameDraft.trim();
+    if (value.length < 2 || value.length > 80) { setLogoError("اسم البراند يجب أن يكون من حرفين إلى 80 حرفًا."); setBrandNameBusy(false); return; }
+    try {
+      const r = await fetch("/api/brand-settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ brandName: value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "تعذر حفظ اسم البراند");
+      setBrandName(j.brandName ?? value); setBrandNameDraft(j.brandName ?? value); setLogoNotice("تم حفظ اسم البراند وسيظهر في الشريط العلوي.");
+      window.dispatchEvent(new Event("brand-settings:changed"));
+    } catch (e) { setLogoError(e instanceof Error ? e.message : "تعذر حفظ اسم البراند"); }
+    finally { setBrandNameBusy(false); }
+  }
 
   async function uploadBrandLogo(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -99,7 +118,9 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
 
     {isOwner && <section className="panel form-panel">
       <div className="section-heading"><div><p className="eyebrow">هوية البراند</p><h2>شعار الفواتير والتقارير</h2></div><span className="soft-icon">✦</span></div>
-      <p className="muted">ارفع شعار البراند ليظهر تلقائيًا في الفواتير وقوائم التسليم المطبوعة. الصيغ المدعومة PNG وJPG وWebP، بحد أقصى 1 ميجابايت.</p>
+      <p className="muted">احفظ اسم البراند وشعاره من مكان واحد لاستخدامهما في واجهة النظام والفواتير والتقارير.</p>
+      <form className="form-grid" onSubmit={saveBrandName}><label className="wide">اسم البراند<input required minLength={2} maxLength={80} value={brandNameDraft} onChange={(event) => setBrandNameDraft(event.target.value)} placeholder="اكتب اسم البراند" /></label><button className="primary" disabled={brandNameBusy || brandNameDraft.trim() === brandName}>{brandNameBusy ? "جارٍ الحفظ…" : "حفظ اسم البراند"}</button></form>
+      <p className="muted">الشعار يظهر في الفواتير والتقارير المطبوعة. الصيغ المدعومة PNG وJPG وWebP، بحد أقصى 1 ميجابايت.</p>
       <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", margin: "18px 0" }}>
         <div style={{ width: 148, height: 100, border: "1px dashed var(--line, #cbd8d2)", borderRadius: 12, display: "grid", placeItems: "center", padding: 10, background: "var(--surface, #f8faf9)" }}>
           {brandLogo ? <img src={brandLogo} alt="شعار البراند الحالي" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /> : <span className="footnote">لا يوجد شعار مرفوع</span>}

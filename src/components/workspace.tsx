@@ -16,8 +16,7 @@ import StaffHours from "@/components/staff-hours";
 import AccountSection from "@/components/account-section";
 import AccountPanel from "@/components/account-panel";
 import ReportsPanel from "@/components/reports-panel";
-import BrandLogoSettings from "@/components/brand-logo-settings";
-import { cachedRequestJson, clearOfflineActor } from "@/lib/offline-sync";
+
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
@@ -37,7 +36,6 @@ const permissionList: Permission[] = [
   { key: "payroll.advance.request", label: "طلب مسحوبات أو سلفة راتب" },
 ];
 async function api(url: string, init?: RequestInit) {
-  if ((init?.method ?? "GET").toUpperCase() === "GET" && new URL(url, window.location.origin).pathname === "/api/branches") return cachedRequestJson<any>(url, init);
   const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
@@ -58,11 +56,12 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
   const [editingStaffStatus, setEditingStaffStatus] = useState("ACTIVE");
   const isOwner = user?.roles.includes("super_admin") ?? false;
   const [brandLogo, setBrandLogo] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState("نظرة");
   useEffect(() => {
     if (!isOwner) return;
     let active = true;
     fetch("/api/brand-settings", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (active && j && !j.error) setBrandLogo(j.logoDataUrl ?? null);
+      if (active && j && !j.error) { setBrandLogo(j.logoDataUrl ?? null); setBrandName(typeof j.brandName === "string" && j.brandName.trim() ? j.brandName.trim() : "نظرة"); }
     }).catch(() => {});
     return () => { active = false; };
   }, [isOwner]);
@@ -92,7 +91,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الدخول"); }
     finally { setBusy(false); }
   }
-  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_SHELL" }); clearOfflineActor(); setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
+  async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_SHELL" });  setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
   async function createBranch(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
@@ -132,7 +131,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <form onSubmit={handleLogin} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={loginPhone} onChange={(e) => { const value = e.target.value; setLoginPhone(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setLoginPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
     <Notice error={error} message={message}/><div className="secure-note"><span className="dot"/> الاتصال بالخادم مطلوب لحفظ كل عملية</div></div></main>;
 
-  return <main className="app-shell"><header className="topbar"><div className="brand">{brandLogo ? <img className="brand-logo small" src={brandLogo} alt="شعار البراند" width={38} height={38}/> : <img className="brand-logo small" src="/icons/icon-192.png" alt="نظرة" width={38} height={38}/>}<div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{user.name.slice(0, 1)}</span><span>{user.name}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
+  return <main className="app-shell"><header className="topbar"><div className="brand">{brandLogo ? <img className="brand-logo small" src={brandLogo} alt="شعار البراند" width={38} height={38}/> : <img className="brand-logo small" src="/icons/icon-192.png" alt="نظرة" width={38} height={38}/>}<div><strong>نظرة</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`}><span className="dot"/>{isOnline ? "متصل بالخادم" : "الخادم غير متاح"}</div><div className="user-pill"><span className="avatar">{(brandName || "نظرة").slice(0, 1)}</span><span>{brandName || "نظرة"}<small>{isOwner ? "مالك البراند" : "بائع"}</small></span></div><button className="quiet" onClick={handleLogout} disabled={busy}>خروج</button></div></header>
     <nav className="workspace-tabs" aria-label="أقسام النظام" role="tablist">
       <Tab id="overview" active={activeTab} setActive={setActiveTab}>نظرة عامة</Tab>
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
@@ -141,7 +140,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {(isOwner || user.permissions.includes("deliveries.complete")) && <Tab id="deliveries" active={activeTab} setActive={setActiveTab}>التسليمات</Tab>}
       {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفاتي وطلباتي</Tab>}
-      {isOwner && <><Tab id="daily-registers" active={activeTab} setActive={setActiveTab}>اليوميات</Tab><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="brand-settings" active={activeTab} setActive={setActiveTab}>هوية البراند</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
+      {isOwner && <><Tab id="daily-registers" active={activeTab} setActive={setActiveTab}>اليوميات</Tab><Tab id="inventory" active={activeTab} setActive={setActiveTab}>الأصناف والمخزون</Tab><Tab id="purchases" active={activeTab} setActive={setActiveTab}>المشتريات والموردون</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزائن والمصروفات</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="lens-prices" active={activeTab} setActive={setActiveTab}>أسعار العدسات</Tab><Tab id="lens-supplies" active={activeTab} setActive={setActiveTab}>توريد العدسات</Tab><Tab id="branches" active={activeTab} setActive={setActiveTab}>الفروع والفريق</Tab></>}
     </nav>
     <Notice error={error} message={message}/>
     {activeTab === "overview" && <>
@@ -162,7 +161,6 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && activeTab === "finance" && <CentralCash />}
     {isOwner && activeTab === "finance" && <><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><ReportsPanel branches={branches} mode="finance" /></>}
     {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /><ReportsPanel branches={branches} mode="staff" /></>}
-    {isOwner && activeTab === "brand-settings" && <BrandLogoSettings />}
     {isOwner && activeTab === "lens-prices" && <LensPricesSection branches={branches} />}
     {isOwner && activeTab === "lens-supplies" && <LensSuppliesSection branches={branches} />}
     {isOwner && activeTab === "branches" && <>

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { cachedRequestJson } from "@/lib/offline-sync";
+
 
 type Branch = { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" };
 type Customer = { id: string; full_name: string; phone: string | null; email: string | null };
@@ -25,7 +25,10 @@ const methodLabels: Record<string, string> = { cash: "نقدي", card: "بطاق
 
 
 async function requestJson(url: string, init?: RequestInit) {
-  return cachedRequestJson<any>(url, init);
+  const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init?.headers }, cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "تعذر إتمام الطلب");
+  return data;
 }
 
 const money = (value: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(value);
@@ -56,6 +59,9 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
+  const [posInvoiceSearch, setPosInvoiceSearch] = useState("");
+  const [showReturnHistory, setShowReturnHistory] = useState(false);
+  const [returnHistory, setReturnHistory] = useState<any[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [paymentDrafts, setPaymentDrafts] = useState<Record<string, { amount: string; paymentMethod: string; operationId: string }>>({});
   const [busy, setBusy] = useState(false);
@@ -117,10 +123,10 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
   }, [canCreate, customerSearch, customerId]);
 
   const filteredSales = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("ar-EG");
+    const term = (mode === "pos" ? posInvoiceSearch : search).trim().toLocaleLowerCase("ar-EG");
     if (!term) return sales;
     return sales.filter((sale) => [String(sale.invoice_number), sale.customer?.full_name ?? "", sale.customer?.phone ?? "", sale.branch?.name ?? ""].some((value) => value.toLocaleLowerCase("ar-EG").includes(term)));
-  }, [sales, search]);
+  }, [sales, search, mode, posInvoiceSearch]);
 
   const itemReferenceTotal = items.reduce((sum, item) => {
     if (item.itemKind === "service") return sum;
@@ -149,7 +155,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
           add: lensSelection.add, pupilDistance: lensSelection.pupilDistance } : null,
         finalTotal: Number(finalTotal), initialPayment: Number(initialPayment), paymentMethod, notes,
       }) });
-      setNotice(result.queued ? "تم حفظ الفاتورة على هذا الجهاز، وهي معلّقة لحين عودة الإنترنت والتحقق من المخزون. لا تعتبر فاتورة معتمدة بعد." : `تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
+      setNotice(`تم إنشاء الفاتورة رقم ${result.invoiceNumber}`);
       setItems([]); setSaleType("medical_glasses"); setLensSelection(emptyLensSelection); setLensQuote(null); setFinalTotal(""); setInitialPayment("0"); setPaymentMethod("cash"); setNotes(""); setCustomerId(""); setCustomerSearch(""); setSelectedCustomerLabel("");
       await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر إنشاء الفاتورة"); }
@@ -221,6 +227,17 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
     finally { setBusy(false); }
   }
 
+  async function openReturnHistory() {
+    setReturnLoading(true); setError("");
+    try {
+      const params = new URLSearchParams();
+      if (branchId) params.set("branchId", branchId);
+      const result = await requestJson(`/api/returns?${params.toString()}`);
+      setReturnHistory(result.returns ?? []); setShowReturnHistory(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تحميل سجل المرتجعات"); }
+    finally { setReturnLoading(false); }
+  }
+  const returnSale = sales.find((sale) => sale.id === returnSaleId) ?? null;
   const visibleProducts = catalogProducts.filter((product) => {
     const expected: Record<string, string> = { frame_only: "frame", sunglasses: "sunglasses", contact_lenses: "contact_lens", sports_glasses: "sports_glasses" };
     if (saleType in expected) return product.category === expected[saleType];
@@ -231,7 +248,7 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
 
   return <section className="panel sales-panel">
     <div className="section-heading"><div><p className="eyebrow">{mode === "pos" ? "تسجيل عملية بيع" : "سجل المبيعات والتحصيلات والمرتجعات"}</p><h2>{mode === "pos" ? "نقطة البيع" : "الفواتير"}</h2></div>{mode === "invoices" && <span className="count-badge">{sales.length}{sales.length === 100 ? "+" : ""} فاتورة</span>}</div>
-    <div className="sales-toolbar"><label>الفرع<select value={branchId} onChange={(event) => changeBranch(event.target.value)}>{availableBranches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>{mode === "invoices" && <label className="sales-search">بحث<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="رقم الفاتورة أو العميل" /></label>}</div>
+    <div className="sales-toolbar"><label>الفرع<select value={branchId} onChange={(event) => changeBranch(event.target.value)}>{availableBranches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label>{mode === "invoices" ? <label className="sales-search">بحث<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="رقم الفاتورة أو العميل" /></label> : <label className="sales-search">رقم فاتورة سابقة للتحصيل أو المرتجع<input inputMode="numeric" value={posInvoiceSearch} onChange={(event) => setPosInvoiceSearch(event.target.value)} placeholder="اكتب رقم الفاتورة" /></label>}</div>
     {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
     {availableBranches.length === 0 ? <div className="empty"><strong>لا يوجد فرع نشط متاح</strong><p>اربط حسابك بفرع نشط من حساب المالك.</p></div> : <>
       {mode === "pos" && canCreate && <form className="sale-form" onSubmit={createSale}>
@@ -248,34 +265,18 @@ export default function SalesSection({ branches, branchIds, isOwner, canCreate, 
         <div className="sale-fields sale-totals"><div className="sale-total-preview"><small>إجمالي الأسعار المرجعية</small><strong>{money(referenceTotal)}</strong></div><label>سعر البيع النهائي للفاتورة<input required type="number" min="0.01" max="1000000" step="0.01" value={finalTotal} onChange={(event) => setFinalTotal(event.target.value)} /></label><label>المدفوع الآن<input type="number" min="0" max={Number(finalTotal || 0)} step="0.01" value={initialPayment} onChange={(event) => setInitialPayment(event.target.value)} /></label><label>طريقة الدفع<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="instapay">إنستاباي</option><option value="other">أخرى</option></select></label></div>
         <label className="sale-notes-label">ملاحظات الفاتورة<textarea rows={2} maxLength={1000} value={notes} onChange={(event) => setNotes(event.target.value)} /></label><button className="primary" disabled={busy || !customerId || !finalTotal || (["medical_glasses", "lenses_only"].includes(saleType) && !lensQuote) || (items.length === 0 && !lensQuote)}>{busy ? "جارٍ حفظ الفاتورة…" : "حفظ الفاتورة"}</button>
       </form>}
-      {mode === "invoices" && <><div className="sales-list-heading"><h3>سجل الفواتير</h3><span className="footnote">آخر 100 فاتورة للفرع المحدد</span></div>
+      {(mode === "invoices" || (mode === "pos" && Boolean(posInvoiceSearch.trim()))) && <><div className="sales-list-heading"><h3>{mode === "pos" ? "نتيجة البحث عن الفاتورة" : "سجل الفواتير"}</h3><span className="footnote">{mode === "invoices" ? "آخر 100 فاتورة للفرع المحدد" : "اختر عرض التفاصيل لتسجيل دفعة أو بدء مرتجع"}</span>{mode === "invoices" && canManageReturns && <button type="button" className="row-action" disabled={returnLoading} onClick={() => void openReturnHistory()}>{returnLoading ? "جارٍ تحميل السجل…" : "سجل المرتجعات"}</button>}</div>
       <div className="table-wrap"><table className="sales-table"><thead><tr><th>الفاتورة</th><th>العميل</th><th>نوع البيع</th><th>المرجعي / النهائي</th><th>المدفوع</th><th>المتبقي</th><th>التسليم</th><th>التفاصيل</th></tr></thead><tbody>
         {filteredSales.map((sale) => <Fragment key={sale.id}><tr><td><strong>#{sale.invoice_number}</strong><small>{date(sale.created_at)}</small></td><td><strong>{sale.customer?.full_name ?? "عميل غير متاح"}</strong><small>{sale.branch?.name ?? ""}</small></td><td>{saleTypeLabels[sale.sale_type] ?? sale.sale_type}</td><td><small>مرجعي {money(Number(sale.reference_total ?? sale.total_amount))}</small><strong>{money(Number(sale.grand_total))}</strong></td><td>{money(sale.paid_amount)}</td><td className={sale.due_amount > 0 ? "balance-due" : "balance-paid"}>{money(sale.due_amount)}</td><td>{canUpdateDelivery ? <select aria-label={`حالة تسليم الفاتورة ${sale.invoice_number}`} className="status-select" value={sale.delivery_status} disabled={busy || sale.delivery_status === "cancelled"} onChange={(event) => void updateStatus(sale.id, event.target.value as Sale["delivery_status"])}>{(["pending", "processing", "ready", "delivered"] as const).map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}</select> : <span className="status active">{statusLabels[sale.delivery_status]}</span>}</td><td><button className="row-action" onClick={() => setExpandedId(expandedId === sale.id ? null : sale.id)}>{expandedId === sale.id ? "إخفاء" : "عرض"}</button></td></tr>
           {expandedId === sale.id && <tr key={`${sale.id}-details`}><td colSpan={8}><div className="sale-detail"><div><strong>الأسعار المرجعية للبنود</strong>{sale.items.map((item) => <p key={item.id}>{item.item_name} × {item.quantity} <span>{money(Number(item.line_total))}</span></p>)}<p><strong>إجمالي البيع النهائي</strong><span>{money(Number(sale.grand_total))}</span></p></div>{sale.prescription && Object.keys(sale.prescription).length > 0 && <div><strong>العدسات والوصفة</strong><p>{String(sale.prescription.lensCompany ?? "")} — {String(sale.prescription.lensTypeName ?? "")}</p><p>اليمنى: {String(sale.prescription.rightSphere ?? "—")} / {String(sale.prescription.rightCylinder ?? "—")} / {String(sale.prescription.rightAxis ?? "—")}</p><p>اليسرى: {String(sale.prescription.leftSphere ?? "—")} / {String(sale.prescription.leftCylinder ?? "—")} / {String(sale.prescription.leftAxis ?? "—")}</p><p>ADD: {String(sale.prescription.add ?? "—")} · PD: {String(sale.prescription.pupilDistance ?? "—")}</p></div>}{sale.notes && <div><strong>ملاحظات</strong><p>{sale.notes}</p></div>}<div><strong>الدفعات</strong>{sale.payments.map((payment) => <p key={payment.id}>{money(Number(payment.amount))} · {methodLabels[payment.payment_method] ?? payment.payment_method} <small>{date(payment.created_at)}</small></p>)}{sale.payments.length === 0 && <p>لم تسجل دفعات بعد.</p>}</div>
             {canPay && sale.due_amount > 0 && <form className="payment-form" onSubmit={(event) => void recordPayment(event, sale.id)}><label>دفعة جديدة<input type="number" min="0.01" max={sale.due_amount} step="0.01" required value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash", operationId: "" }).amount} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { paymentMethod: "cash", operationId: crypto.randomUUID() }), amount: event.target.value, operationId: crypto.randomUUID() } })} /></label><label>طريقة الدفع<select value={(paymentDrafts[sale.id] ?? { amount: "", paymentMethod: "cash", operationId: "" }).paymentMethod} onChange={(event) => setPaymentDrafts({ ...paymentDrafts, [sale.id]: { ...(paymentDrafts[sale.id] ?? { amount: "", operationId: crypto.randomUUID() }), paymentMethod: event.target.value, operationId: crypto.randomUUID() } })}><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="instapay">إنستاباي</option><option value="other">أخرى</option></select></label><button className="primary" disabled={busy}>تسجيل الدفعة</button></form>}
-            {canManageReturns && sale.delivery_status !== "cancelled" && <div className="sale-return-area">
-              <button type="button" className="row-action" disabled={busy} onClick={() => void openReturnForm(sale)}>
-                {returnSaleId === sale.id ? "إلغاء المرتجع" : "إنشاء مرتجع"}
-              </button>
-              {returnSaleId === sale.id && <form className="payment-form sale-return-form" onSubmit={(event) => void submitReturn(event, sale)}>
-                <div><strong>مرتجع الفاتورة #{sale.invoice_number}</strong><p className="footnote">حدد الكميات المراد إرجاعها. المبلغ النهائي يعتمد على قواعد الخصم والمبالغ المدفوعة في قاعدة البيانات.</p></div>
-                {sale.items.map((item) => <label key={item.id} className="return-item-row">
-                  <span>{item.item_name} · المباع {item.quantity}</span>
-                  <input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1"
-                    value={returnQuantities[item.id] ?? 0}
-                    onChange={(event) => { setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) })); setReturnOperationId(crypto.randomUUID()); }} />
-                </label>)}
-                <label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => { setReturnCashAccountId(event.target.value); setReturnOperationId(crypto.randomUUID()); }}>
-                  <option value="">اختر الخزنة</option>{returnAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {methodLabels[account.payment_method] ?? account.payment_method}</option>)}
-                </select></label>
-                <label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnOperationId(crypto.randomUUID()); }} placeholder="اكتب سبب إرجاع الصنف" /></label>
-                <button className="primary" disabled={busy || !returnCashAccountId || !returnReason.trim() || !sale.items.some((item) => Number(returnQuantities[item.id]) > 0)}>{busy ? "جارٍ تسجيل المرتجع…" : "تأكيد المرتجع ورد المبلغ"}</button>
-              </form>}
-            </div>}
+{canManageReturns && sale.delivery_status !== "cancelled" && <div className="sale-return-area"><button type="button" className="row-action" disabled={busy} onClick={() => void openReturnForm(sale)}>إنشاء مرتجع</button></div>}
           </div></td></tr>}</Fragment>)}
         {filteredSales.length === 0 && <tr><td colSpan={8} className="table-empty">{search ? "لا توجد نتائج مطابقة." : "لا توجد فواتير في هذا الفرع بعد."}</td></tr>}
       </tbody></table></div></>}
     </>}
+    {returnSale && canManageReturns && <div className="return-modal-backdrop" role="presentation" onClick={() => setReturnSaleId(null)}><section className="return-modal" role="dialog" aria-modal="true" aria-labelledby="return-modal-title" onClick={(event) => event.stopPropagation()}><div className="return-modal-heading"><h3 id="return-modal-title">مرتجع الفاتورة #{returnSale.invoice_number}</h3><button type="button" className="row-action" onClick={() => setReturnSaleId(null)}>إغلاق</button></div><form className="payment-form sale-return-form" onSubmit={(event) => void submitReturn(event, returnSale)}><p className="footnote">حدد الكميات المراد إرجاعها. قيمة الرد تعتمد على قواعد الخصم والمبالغ المدفوعة المحفوظة في قاعدة البيانات.</p>{returnSale.items.map((item) => <label key={item.id} className="return-item-row"><span>{item.item_name} · المباع {item.quantity}</span><input aria-label={`كمية مرتجعة من ${item.item_name}`} type="number" min="0" max={item.quantity} step="1" value={returnQuantities[item.id] ?? 0} onChange={(event) => { setReturnQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(item.quantity, Number(event.target.value) || 0)) })); setReturnOperationId(crypto.randomUUID()); }} /></label>)}<label>خزنة رد المبلغ<select required value={returnCashAccountId} onChange={(event) => { setReturnCashAccountId(event.target.value); setReturnOperationId(crypto.randomUUID()); }}><option value="">اختر الخزنة</option>{returnAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {methodLabels[account.payment_method] ?? account.payment_method}</option>)}</select></label><label>سبب المرتجع<textarea required minLength={3} maxLength={500} rows={2} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setReturnOperationId(crypto.randomUUID()); }} placeholder="اكتب سبب إرجاع الصنف" /></label><button className="primary" disabled={busy || !returnCashAccountId || !returnReason.trim() || !returnSale.items.some((item) => Number(returnQuantities[item.id]) > 0)}>{busy ? "جارٍ تسجيل المرتجع…" : "تأكيد المرتجع ورد المبلغ"}</button></form></section></div>}
+    {showReturnHistory && <div className="return-modal-backdrop" role="presentation" onClick={() => setShowReturnHistory(false)}><section className="return-modal return-history-modal" role="dialog" aria-modal="true" aria-labelledby="return-history-title" onClick={(event) => event.stopPropagation()}><div className="return-modal-heading"><h3 id="return-history-title">سجل المرتجعات</h3><button type="button" className="row-action" onClick={() => setShowReturnHistory(false)}>إغلاق</button></div>{returnHistory.length ? <div className="table-wrap"><table><thead><tr><th>المرتجع</th><th>الفاتورة</th><th>الفرع</th><th>المبلغ</th><th>السبب</th><th>التاريخ</th></tr></thead><tbody>{returnHistory.map((item) => <tr key={item.id}><td>{String(item.id).slice(0, 8)}</td><td>#{item.invoiceNumber ?? "—"}<small>{item.customerName ?? ""}</small></td><td>{item.branchName ?? "—"}</td><td>{money(Number(item.refundAmount ?? 0))}</td><td>{item.reason}</td><td>{date(item.createdAt)}</td></tr>)}</tbody></table></div> : <p className="footnote">لا توجد مرتجعات مسجلة لهذا الفرع حتى الآن.</p>}</section></div>}
     <p className="footnote">{mode === "pos" ? "راجع بيانات العميل والأصناف والمبلغ قبل حفظ الفاتورة؛ تُخصم كميات المخزون عند اعتماد البيع." : "السعر النهائي يُدخل مرة واحدة للفاتورة."} أسعار البنود والعدسات مرجعية ومحفوظة كنسخة تاريخية، ومخزون المنتجات يُخصم عند اعتماد البيع.</p>
   </section>;
 }

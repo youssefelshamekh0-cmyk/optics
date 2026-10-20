@@ -28,7 +28,6 @@ async function call(url: string, init?: RequestInit) {
 export default function AccountPanel() {
   const [data, setData] = useState<Account | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
-  const [pw, setPw] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [leave, setLeave] = useState({ type: "leave" as "leave" | "permission", startDate: todayCairo(), endDate: todayCairo(), startTime: "", endTime: "", reason: "" });
 
   const load = useCallback(async () => {
@@ -37,14 +36,7 @@ export default function AccountPanel() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  async function changePassword(event: FormEvent) {
-    event.preventDefault(); setError(""); setNotice("");
-    if (pw.newPassword !== pw.confirm) { setError("تأكيد كلمة المرور غير مطابق"); return; }
-    setBusy(true);
-    try { await call("/api/account/password", { method: "POST", body: JSON.stringify({ currentPassword: pw.currentPassword, newPassword: pw.newPassword }) }); setPw({ currentPassword: "", newPassword: "", confirm: "" }); setNotice("تم تغيير كلمة المرور"); }
-    catch (e) { setError(e instanceof Error ? e.message : "تعذر تغيير كلمة المرور"); } finally { setBusy(false); }
-  }
-  async function sendLeave(event: FormEvent) {
+async function sendLeave(event: FormEvent) {
     event.preventDefault(); setError(""); setNotice(""); setBusy(true);
     try {
       const body = leave.type === "leave" ? { type: "leave", startDate: leave.startDate, endDate: leave.endDate, reason: leave.reason } : { type: "permission", startDate: leave.startDate, startTime: leave.startTime, endTime: leave.endTime, reason: leave.reason };
@@ -87,13 +79,6 @@ export default function AccountPanel() {
     </> : <p className="notice error">لا يوجد سجل راتب مرتبط بحسابك بعد؛ اطلب من المالك إضافته.</p>)}
 
     <div className="ops-forms">
-      <form className="ops-form" onSubmit={changePassword}>
-        <h3>تغيير كلمة المرور</h3>
-        <label>كلمة المرور الحالية<input required type="password" autoComplete="current-password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} /></label>
-        <label>كلمة المرور الجديدة (8 أحرف على الأقل)<input required type="password" minLength={8} maxLength={72} autoComplete="new-password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} /></label>
-        <label>تأكيد كلمة المرور الجديدة<input required type="password" minLength={8} maxLength={72} autoComplete="new-password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} /></label>
-        <button className="primary" disabled={busy}>حفظ كلمة المرور</button>
-      </form>
       {!isOwner && <form className="ops-form" onSubmit={sendLeave}>
         <h3>طلب إجازة أو استئذان</h3>
         <label>نوع الطلب<select value={leave.type} onChange={(e) => setLeave({ ...leave, type: e.target.value as "leave" | "permission" })}><option value="leave">إجازة</option><option value="permission">استئذان (ساعات)</option></select></label>
