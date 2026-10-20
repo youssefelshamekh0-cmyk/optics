@@ -382,3 +382,26 @@ button:disabled{cursor:not-allowed}
  html{scroll-behavior:auto}
  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* Refined mobile header and live notifications */
+.notification-wrap{position:relative;display:flex;align-items:center}
+.notification-button{position:relative;min-width:40px;min-height:40px;font-size:22px;display:grid;place-items:center}
+.notification-count{position:absolute;top:0;right:0;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--red);color:#fff;font-size:10px;line-height:17px;text-align:center;font-weight:700}
+.notification-menu{position:absolute;z-index:50;top:calc(100% + 10px);right:0;width:min(360px,calc(100vw - 28px));max-height:min(65vh,520px);overflow:auto;padding:14px;background:var(--white);border:1px solid var(--line);border-radius:16px;box-shadow:0 14px 36px #173b3520}
+.notification-menu .section-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.notification-item{display:flex;width:100%;flex-direction:column;gap:4px;text-align:right;background:transparent;border:0;border-top:1px solid var(--line);padding:12px 4px;color:var(--ink)}
+.notification-item strong{font-size:13px}.notification-item span{font-size:12px;color:var(--muted)}.notification-item small{font-size:10px;color:var(--muted)}
+.notification-item:hover{background:var(--mint)}
+.topbar{gap:14px;min-width:0}.top-actions{gap:8px;min-width:0}.brand{flex-shrink:0}.brand-logo.small{object-fit:contain;border-radius:13px}
+@media(max-width:680px){
+ .app-shell{padding:0 14px 24px}
+ .topbar{height:auto;min-height:70px;padding:12px 0;align-items:flex-start;gap:10px;flex-wrap:wrap}
+ .brand{gap:8px}.brand-logo.small{width:36px;height:36px}.brand strong{font-size:15px}.brand span{font-size:10px}
+ .top-actions{width:100%;justify-content:space-between;gap:5px;flex-wrap:wrap}
+ .top-actions .connection{font-size:10px}
+ .top-actions .quiet:not(.icon-action){padding:7px 10px}
+ .workspace-tabs{margin:0 -14px;padding:10px 14px;gap:7px;overflow-x:auto;scrollbar-width:thin}
+ .workspace-tabs .workspace-tab{flex:0 0 auto;white-space:nowrap}
+ .notification-menu{position:fixed;top:132px;right:14px;left:14px;width:auto;max-height:calc(100vh - 160px)}
+ .mode-switch{overflow-x:auto;flex-wrap:nowrap}.mode-switch button{flex:0 0 auto;white-space:nowrap}
+}

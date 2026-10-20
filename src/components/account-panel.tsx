@@ -25,10 +25,11 @@ async function call(url: string, init?: RequestInit) {
   return data;
 }
 
-export default function AccountPanel() {
+export default function AccountPanel({ branches, branchIds }: { branches: {id:string;name:string;code:string;status:"ACTIVE"|"INACTIVE"}[]; branchIds: string[] }) {
   const [data, setData] = useState<Account | null>(null);
   const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
   const [leave, setLeave] = useState({ type: "leave" as "leave" | "permission", startDate: todayCairo(), endDate: todayCairo(), startTime: "", endTime: "", reason: "" });
+  const [advance, setAdvance] = useState({ branchId: branchIds[0] ?? "", amount: "", notes: "" });
 
   const load = useCallback(async () => {
     try { setData(await call("/api/account")); setError(""); }
