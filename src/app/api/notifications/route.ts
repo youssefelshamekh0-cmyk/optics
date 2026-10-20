@@ -16,7 +16,7 @@ export async function GET() {
   const storedEntityIds = new Set((stored ?? []).map((x: any) => x.entity_id).filter(Boolean));
   for (const x of stored ?? []) {
     const event = String(x.event_key ?? "");
-    const target = event.includes("lens") ? "lenses" : event.includes("advance") || event.includes("time_off") || event.includes("payroll") ? "staff" : "debts";
+    const target = event.includes("low_stock") ? "inventory" : event.includes("lens") ? "lenses" : event.includes("advance") || event.includes("time_off") || event.includes("payroll") ? "staff" : "debts";
     items.push({ id: x.id, title: x.title, body: x.body, createdAt: x.created_at, target, kind: event });
   }
   if (user.roles.includes("super_admin")) {
