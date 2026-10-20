@@ -18,12 +18,19 @@ import AccountPanel from "@/components/account-panel";
 import ReportsPanel from "@/components/reports-panel";
 import SystemHealthPanel from "@/components/system-health-panel";
 import GlobalSearch from "@/components/global-search";
+import SupplierLedgerSection from "@/components/supplier-ledger-section";
 
 
 type User = { id?: string; name: string; email?: string | null; phone?: string; roles: string[]; permissions: string[]; branchIds: string[] };
 type Branch = { id: string; code: string; name: string; address: string | null; phone: string | null; status: "ACTIVE" | "INACTIVE"; _count?: { userAccess: number } };
 type Staff = { id: string; name: string; phone: string; status: string; employee?: { branch_id:string;base_salary:number;commission_rate:number;job_title:string } | null; roles: { role: { key: string; name: string } }[]; grants: { permission: { key: string } }[]; branchAccess: { branch: { id: string; code: string; name: string } }[] };
 type Permission = { key: string; label: string };
+function base64UrlToBytes(value: string) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const raw = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+}
+
 const permissionList: Permission[] = [
   { key: "branches.read", label: "عرض الفروع المسموح بها" },
   { key: "customers.read", label: "عرض العملاء" }, { key: "customers.manage", label: "إدارة العملاء" },
@@ -51,6 +58,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
   const [lensView, setLensView] = useState<"prices" | "orders">("prices");
   const [inventoryView, setInventoryView] = useState<"products" | "stock" | "purchases">("products");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
   const [notifications, setNotifications] = useState<{id:string;title:string;body:string;createdAt:string;target:string;kind:string}[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]); const [staff, setStaff] = useState<Staff[]>([]);
@@ -87,6 +95,21 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
   }, [user, isOwner]);
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
+    if (!user) { setNotifications([]); setPushEnabled(false); return; }
+    let active = true;
+    const loadNotifications = async () => {
+      try { const result = await api("/api/notifications"); if (active) setNotifications(result.notifications ?? []); }
+      catch { /* Notification polling must not block the workspace. */ }
+    };
+    void loadNotifications();
+    const timer = window.setInterval(loadNotifications, 30000);
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      navigator.serviceWorker.getRegistration("/").then((registration) => registration?.pushManager.getSubscription())
+        .then((subscription) => { if (active) setPushEnabled(Boolean(subscription)); }).catch(() => {});
+    }
+    return () => { active = false; window.clearInterval(timer); };
+  }, [user]);
+  useEffect(() => {
     if (!user) return;
     let active = true;
     const check = async () => { try { const result = await fetch("/api/auth/session", { cache: "no-store" }); if (active) setIsOnline(result.ok); } catch { if (active) setIsOnline(false); } };
@@ -101,6 +124,26 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     try { const credentials = normalizeEgyptianPhone(loginPhone); if (!credentials) throw new Error("أدخل رقم موبايل مصري صحيحًا"); const supabase = createSupabaseClient(); const { error: signInError } = await supabase.auth.signInWithPassword({ phone: credentials.phone, password: loginPassword }); if (signInError) throw new Error("بيانات الدخول غير صحيحة"); await api("/api/auth/login", { method: "POST", body: "{}" }); setUser((await api("/api/auth/session")).user); setMessage("تم تسجيل الدخول"); }
     catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الدخول"); }
     finally { setBusy(false); }
+  }
+  async function enablePushNotifications() {
+    setError(""); setMessage("");
+    try {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+        throw new Error("متصفحك لا يدعم إشعارات الويب؛ افتح النظام من Chrome أو ثبّته كتطبيق.");
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("اسمح بالإشعارات من إعدادات المتصفح حتى تصلك التنبيهات.");
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const keyResult = await api("/api/push-subscriptions");
+      if (!keyResult.publicKey) throw new Error("مفتاح إشعارات الويب غير مهيأ على الخادم.");
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToBytes(keyResult.publicKey),
+      });
+      await api("/api/push-subscriptions", { method: "POST", body: JSON.stringify({ subscription: subscription.toJSON() }) });
+      setPushEnabled(true); setMessage("تم تفعيل إشعارات الموبايل لهذا الجهاز.");
+    } catch (e) { setError(e instanceof Error ? e.message : "تعذر تفعيل إشعارات الموبايل"); }
   }
   async function handleLogout() { setBusy(true); try { const supabase = createSupabaseClient(); const { error: signOutError } = await supabase.auth.signOut(); if (signOutError) throw signOutError; navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_SHELL" });  setUser(null); setBranches([]); setStaff([]); window.location.assign("/login"); } catch (e) { setError(e instanceof Error ? e.message : "تعذر تسجيل الخروج"); } finally { setBusy(false); } }
   async function createBranch(event: FormEvent) {
@@ -142,14 +185,15 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <form onSubmit={handleLogin} className="stack"><label>رقم الموبايل<input type="tel" inputMode="tel" autoComplete="username" required value={loginPhone} onChange={(e) => { const value = e.target.value; setLoginPhone(value); const normalized = normalizeEgyptianPhone(value); if (normalized) setLoginPassword(normalized.initialPassword); }} placeholder="01012345678" /></label><label>كلمة المرور<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} /></label><p className="footnote">تُملأ مبدئيًا من رقمك بعد حذف الصفر الأول، ويمكنك إدخال كلمة مرور مختلفة.</p><button className="primary" disabled={busy}>{busy ? "جارٍ التحقق…" : "تسجيل الدخول"}</button></form>
     <Notice error={error} message={message}/><div className="secure-note"><span className="dot"/> الاتصال بالخادم مطلوب لحفظ كل عملية</div></div></main>;
 
-  return <main className="app-shell"><header className="topbar"><div className="brand">{brandLogo ? <img className="brand-logo small" src={brandLogo} alt="شعار البراند" width={38} height={38}/> : <img className="brand-logo small" src="/icons/icon-192.png" alt="نظرة" width={38} height={38}/>}<div><strong>{brandName || "نظرة"}</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><button type="button" className="quiet icon-action" aria-label={searchOpen ? "إغلاق البحث" : "فتح البحث"} aria-expanded={searchOpen} onClick={() => setSearchOpen((value) => !value)}>⌕</button><div className="notification-wrap"><button type="button" className="quiet icon-action notification-button" aria-label="التنبيهات" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(v=>!v)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>{notifications.length>0&&<span className="notification-count">{notifications.length>99?"99+":notifications.length}</span>}</button>{notificationsOpen&&<div className="notification-menu" role="dialog" aria-label="التنبيهات"><div className="section-heading"><strong>التنبيهات</strong><button type="button" className="quiet" onClick={()=>setNotificationsOpen(false)}>إغلاق</button></div>{notifications.length===0?<p className="footnote">لا توجد تنبيهات حالية.</p>:notifications.map(n=><button type="button" className="notification-item" key={n.id} onClick={()=>{setActiveTab(n.target);if(n.target==="lenses")setLensView("orders");setNotificationsOpen(false)}}><strong>{n.title}</strong><span>{n.body}</span><small>{new Intl.DateTimeFormat("ar-EG",{dateStyle:"short",timeStyle:"short"}).format(new Date(n.createdAt))}</small></button>)}</div>}</div><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`} role="status" aria-label={isOnline ? "متصل بالخادم" : "الخادم غير متاح"} title={isOnline ? "متصل بالخادم" : "الخادم غير متاح"}><span className="dot"/></div><button type="button" className="quiet icon-action logout-button" onClick={handleLogout} disabled={busy} aria-label="خروج" title="خروج"><svg aria-hidden="true" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg></button></div></header>
+  return <main className="app-shell"><header className="topbar"><div className="brand">{brandLogo ? <img className="brand-logo small" src={brandLogo} alt="شعار البراند" width={38} height={38}/> : <img className="brand-logo small" src="/icons/icon-192.png" alt="نظرة" width={38} height={38}/>}<div><strong>{brandName || "نظرة"}</strong><span>إدارة الفروع</span></div></div><div className="top-actions"><button type="button" className="quiet icon-action" aria-label={searchOpen ? "إغلاق البحث" : "فتح البحث"} aria-expanded={searchOpen} onClick={() => setSearchOpen((value) => !value)}>⌕</button><div className="notification-wrap"><button type="button" className="quiet icon-action notification-button" aria-label="التنبيهات" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(v=>!v)}><svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>{notifications.length>0&&<span className="notification-count">{notifications.length>99?"99+":notifications.length}</span>}</button>{notificationsOpen&&<div className="notification-menu" role="dialog" aria-label="التنبيهات"><div className="section-heading"><strong>التنبيهات</strong><div style={{display:"flex",gap:8,alignItems:"center"}}><button type="button" className="quiet" onClick={()=>void enablePushNotifications()}>{pushEnabled?"الإشعارات مفعلة":"تفعيل Push"}</button><button type="button" className="quiet" onClick={()=>setNotificationsOpen(false)}>إغلاق</button></div></div>{notifications.length===0?<p className="footnote">لا توجد تنبيهات حالية.</p>:notifications.map(n=><button type="button" className="notification-item" key={n.id} onClick={()=>{setActiveTab(n.target);if(n.target==="lenses")setLensView("orders");setNotificationsOpen(false)}}><strong>{n.title}</strong><span>{n.body}</span><small>{new Intl.DateTimeFormat("ar-EG",{dateStyle:"short",timeStyle:"short"}).format(new Date(n.createdAt))}</small></button>)}</div>}</div><ShiftBadge /><InstallButton /><div className={`connection ${isOnline ? "" : "disconnected"}`} role="status" aria-label={isOnline ? "متصل بالخادم" : "الخادم غير متاح"} title={isOnline ? "متصل بالخادم" : "الخادم غير متاح"}><span className="dot"/></div><button type="button" className="quiet icon-action logout-button" onClick={handleLogout} disabled={busy} aria-label="خروج" title="خروج"><svg aria-hidden="true" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg></button></div></header>
     {searchOpen && <div className="search-drawer"><GlobalSearch onNavigate={(tab) => { setActiveTab(tab === "pos" || tab === "invoices" ? "sales" : tab); if (tab === "pos" || tab === "invoices") setSalesView(tab); setSearchOpen(false); }} isOwner={isOwner} /><button type="button" className="quiet" onClick={() => setSearchOpen(false)}>إغلاق</button></div>}
     <nav className="workspace-tabs" aria-label="أقسام النظام" role="tablist">
       <Tab id="overview" active={activeTab} setActive={setActiveTab}>الرئيسية</Tab>
       {(isOwner || user.permissions.includes("sales.create") || user.permissions.includes("sales.read") || user.permissions.includes("returns.manage") || user.permissions.includes("deliveries.complete")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>المبيعات</Tab>}
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
-      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>المخزون</Tab><Tab id="lenses" active={activeTab} setActive={setActiveTab}>العدسات</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزينة</Tab><Tab id="reports" active={activeTab} setActive={setActiveTab}>التقارير</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="settings" active={activeTab} setActive={setActiveTab}>الإعدادات</Tab></>}
+      {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>المخزون</Tab><Tab id="lenses" active={activeTab} setActive={setActiveTab}>العدسات</Tab><Tab id="debts" active={activeTab} setActive={setActiveTab}>المديونيات</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزينة</Tab><Tab id="reports" active={activeTab} setActive={setActiveTab}>التقارير</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="settings" active={activeTab} setActive={setActiveTab}>الإعدادات</Tab></>}
       {!isOwner && user.permissions.includes("expenses.create") && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفات</Tab>}
+      {(isOwner || user.permissions.includes("purchases.manage")) && <Tab id="debts" active={activeTab} setActive={setActiveTab}>المديونيات</Tab>}
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
     </nav>
     <Notice error={error} message={message}/>
@@ -176,7 +220,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       <button type="button" role="tab" aria-selected={inventoryView==="stock"} className={inventoryView==="stock"?"on":"off"} onClick={()=>setInventoryView("stock")}>الجرد والتحويلات</button>
       <button type="button" role="tab" aria-selected={inventoryView==="purchases"} className={inventoryView==="purchases"?"on":"off"} onClick={()=>setInventoryView("purchases")}>المشتريات والموردون</button>
     </div>{inventoryView==="products"?<ProductsSection branches={branches}/>:inventoryView==="stock"?<OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>:<OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}</section>}
-    {isOwner && activeTab === "finance" && <><CentralCash /><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/></>}
+    {(isOwner || user.permissions.includes("purchases.manage")) && activeTab === "debts" && <SupplierLedgerSection isOwner={isOwner} />}
+    {isOwner && activeTab === "finance" && <><CentralCash /><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/></>
     {isOwner && activeTab === "reports" && <><ReportsPanel branches={branches} mode="finance" /><ReportsPanel branches={branches} mode="staff" /><FinanceCharts /></>}
     {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /></>}
     {isOwner && activeTab === "lenses" && <section className="panel"><div className="mode-switch" role="tablist" aria-label="إدارة العدسات">
