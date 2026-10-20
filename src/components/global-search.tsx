@@ -10,7 +10,7 @@ type Result = {
 const empty: Result = { customers: [], invoices: [], products: [] };
 const money = (value: number) => new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }).format(value);
 
-export default function GlobalSearch({ onNavigate }: { onNavigate: (tab: string) => void }) {
+export default function GlobalSearch({ onNavigate, isOwner }: { onNavigate: (tab: string) => void; isOwner: boolean }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Result>(empty);
   const [error, setError] = useState("");
@@ -44,7 +44,7 @@ export default function GlobalSearch({ onNavigate }: { onNavigate: (tab: string)
       {!loading && !error && !hasResults && <p>لا توجد نتائج مطابقة.</p>}
       {results.customers.length > 0 && <section><strong>العملاء</strong>{results.customers.map((item) => <button type="button" key={item.id} onClick={() => go("customers")}><span>{item.name}</span><small>{item.phone || "بدون هاتف"}</small></button>)}</section>}
       {results.invoices.length > 0 && <section><strong>الفواتير</strong>{results.invoices.map((item) => <button type="button" key={item.id} onClick={() => go("invoices")}><span>فاتورة #{item.invoiceNumber} — {item.customerName}</span><small>{item.branchName} · {money(item.total)} · {item.status}</small></button>)}</section>}
-      {results.products.length > 0 && <section><strong>الأصناف</strong>{results.products.map((item) => <button type="button" key={item.id} onClick={() => go("inventory")}><span>{item.name}</span><small>{item.sku || "بدون كود"} · {(item.branches ?? []).map((branch) => branch.name + ": " + branch.quantity).join("، ")}</small></button>)}</section>}
+      {results.products.length > 0 && <section><strong>الأصناف</strong>{results.products.map((item) => <button type="button" key={item.id} onClick={() => go(isOwner ? "inventory" : "pos")}><span>{item.name}</span><small>{item.sku || "بدون كود"} · {(item.branches ?? []).map((branch) => branch.name + ": " + branch.quantity).join("، ")}</small></button>)}</section>}
     </div>}
   </div>;
 }
