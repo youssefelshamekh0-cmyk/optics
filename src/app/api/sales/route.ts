@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { notifyUsers } from "@/lib/notifications";
 import type { Json } from "@/lib/supabase/database.types";
 
 const itemSchema = z.object({
@@ -172,5 +173,30 @@ export async function POST(request: Request) {
   const invoiceNumber = created?.invoiceNumber ?? created?.invoice_number;
   if (!saleId || invoiceNumber === undefined) throw new Error("لم ترجع قاعدة البيانات رقم الفاتورة");
   await audit(user!.id, "sale.create", "sale", saleId, { operationId, branchId: input.branchId, invoiceNumber, saleType: input.saleType, referenceTotal, finalTotal });
+  try {
+    const soldProductIds = [...new Set(items.map((item) => item.productId).filter((id): id is string => Boolean(id)))];
+    if (soldProductIds.length) {
+      const { data: lowRows, error: stockError } = await admin.from("branch_products")
+        .select("branch_id,product_id,quantity,low_stock_threshold,products(name),branches(name)")
+        .eq("branch_id", input.branchId).in("product_id", soldProductIds);
+      if (!stockError) {
+        const role = await admin.from("roles").select("id").eq("key", "super_admin").maybeSingle();
+        const ownerRows = role.data ? await admin.from("user_roles").select("user_id").eq("role_id", role.data.id) : { data: [] };
+        const owners = (ownerRows.data ?? []).map((row: any) => row.user_id as string);
+        for (const stock of lowRows ?? []) {
+          if (Number(stock.quantity) <= Number(stock.low_stock_threshold ?? 5)) {
+            await notifyUsers(owners, user!.id, {
+              eventKey: "low_stock:" + stock.branch_id + ":" + stock.product_id,
+              title: "تنبيه نقص مخزون",
+              body: (stock.products?.name ?? "صنف") + " · " + (stock.branches?.name ?? "الفرع") + " · المتبقي " + Number(stock.quantity),
+              href: "/dashboard", entityType: "branch_product", entityId: stock.product_id,
+            });
+          }
+        }
+      }
+    }
+  } catch (notificationError) {
+    console.error("low-stock notification failed", notificationError instanceof Error ? notificationError.message : "unknown");
+  }
   return Response.json({ saleId, invoiceNumber, operationId }, { status: 201 });
 }
