@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/database.types";
 import { getCurrentUser, requirePermission, requireSameOrigin } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { notifyUsers } from "@/lib/notifications";
 
 const uuid = z.string().uuid();
 function branchAllowed(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>, branchId: string) { return user.roles.includes("super_admin") || user.branchIds.includes(branchId); }
@@ -244,6 +245,63 @@ export async function POST(request:Request){
      if(account.data.is_central||account.data.branch_id!==parsed.data.branchId)return Response.json({error:"اختر خزنة تابعة لفرع المشتريات؛ لا تُسجل مشتريات الفرع على الخزنة المركزية"},{status:409});
    }
    const {data,error}=await admin.rpc("receive_purchase",{p_invoice:parsed.data.invoiceNumber,p_supplier:parsed.data.supplierName,p_phone:parsed.data.supplierPhone,p_branch:parsed.data.branchId,p_items:parsed.data.items.map(i=>({productId:i.productId,quantity:i.quantity,unitCost:i.unitCost})),p_paid:parsed.data.paidAmount,p_account:parsed.data.cashAccountId,p_actor:user!.id});if(error?.code==="23505")return Response.json({error:"رقم فاتورة المورد مسجل بالفعل"},{status:409});if(error)throw error;entityId=data;
+ }
+ // Deliver durable in-app alerts and web push after the business action has succeeded.
+ try {
+   const ownerRecipients = async () => {
+     const role = await admin.from("roles").select("id").eq("key","super_admin").maybeSingle();
+     if (role.error || !role.data) return [];
+     const owners = await admin.from("user_roles").select("user_id").eq("role_id",role.data.id);
+     if (owners.error) return [];
+     return (owners.data ?? []).map((x:any)=>x.user_id as string);
+   };
+   if (action === "timeOffRequest" && entityId) {
+     const [owners, requestRow] = await Promise.all([
+       ownerRecipients(),
+       admin.from("staff_time_off_requests").select("request_type,reason,branches(name),user_profiles(full_name)").eq("id",entityId).maybeSingle()
+     ]);
+     const row = requestRow.data;
+     await notifyUsers(owners, user!.id, {
+       eventKey: "staff_time_off_requested", title: row?.request_type === "leave" ? "طلب إجازة جديد" : "طلب استئذان جديد",
+       body: (row?.user_profiles?.full_name ?? user!.name) + (row?.branches?.name ? " · " + row.branches.name : "") + (row?.reason ? " · " + row.reason : ""),
+       href: "/dashboard", entityType: "staff_time_off_request", entityId
+     });
+   } else if (action === "advanceRequest" && entityId) {
+     const [owners, requestRow] = await Promise.all([
+       ownerRecipients(),
+       admin.from("payroll_advance_requests").select("amount,notes,branches(name),user_profiles(full_name)").eq("id",entityId).maybeSingle()
+     ]);
+     const row = requestRow.data;
+     await notifyUsers(owners, user!.id, {
+       eventKey: "payroll_advance_requested", title: "طلب سلفة جديد",
+       body: (row?.user_profiles?.full_name ?? user!.name) + " · " + Number(row?.amount ?? 0).toLocaleString("ar-EG") + " ج.م" + (row?.branches?.name ? " · " + row.branches.name : ""),
+       href: "/dashboard", entityType: "payroll_advance_request", entityId
+     });
+   } else if (action === "timeOffDecision" && entityId) {
+     const { data: row } = await admin.from("staff_time_off_requests").select("user_id,request_type,status,reviewer_note").eq("id",entityId).maybeSingle();
+     if (row?.user_id) await notifyUsers([row.user_id], user!.id, {
+       eventKey: "staff_time_off_decision", title: row.status === "approved" ? "تمت الموافقة على طلبك" : "تم رفض طلبك",
+       body: (row.request_type === "leave" ? "طلب الإجازة" : "طلب الاستئذان") + (row.reviewer_note ? " · " + row.reviewer_note : ""),
+       href: "/dashboard", entityType: "staff_time_off_request", entityId
+     });
+   } else if (action === "advanceDecision" && entityId) {
+     const { data: row } = await admin.from("payroll_advance_requests").select("user_id,amount,status").eq("id",entityId).maybeSingle();
+     if (row?.user_id) await notifyUsers([row.user_id], user!.id, {
+       eventKey: "payroll_advance_decision", title: row.status === "paid" ? "تم اعتماد وصرف السلفة" : "تم رفض طلب السلفة",
+       body: Number(row.amount ?? 0).toLocaleString("ar-EG") + " ج.م",
+       href: "/dashboard", entityType: "payroll_advance_request", entityId
+     });
+   } else if (action === "payrollPay" && entityId) {
+     const { data: payrollRow } = await admin.from("payroll_entries").select("employee_id,amount_paid,employees(user_id,full_name)").eq("id",entityId).maybeSingle();
+     const recipient = payrollRow?.employees?.user_id;
+     if (recipient) await notifyUsers([recipient], user!.id, {
+       eventKey: "payroll_paid", title: "تم صرف الراتب",
+       body: "تم تسجيل صرف " + Number(parsed.data.amount).toLocaleString("ar-EG") + " ج.م من الخزنة المركزية",
+       href: "/dashboard", entityType: "payroll_entry", entityId
+     });
+   }
+ } catch (notificationError) {
+   console.error("notification delivery failed", notificationError instanceof Error ? notificationError.message : "unknown");
  }
  const auditMetadata:Record<string,unknown>={};
  if(action==="centralDeposit"||action==="cashReconcile"||action==="transfer"||action==="transferReceive")auditMetadata.result=actionResult;
