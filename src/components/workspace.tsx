@@ -139,7 +139,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       let subscription = await registration.pushManager.getSubscription();
       if (!subscription) subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: base64UrlToBytes(keyResult.publicKey),
+        applicationServerKey: base64UrlToBytes(keyResult.publicKey) as BufferSource,
       });
       await api("/api/push-subscriptions", { method: "POST", body: JSON.stringify({ subscription: subscription.toJSON() }) });
       setPushEnabled(true); setMessage("تم تفعيل إشعارات الموبايل لهذا الجهاز.");
