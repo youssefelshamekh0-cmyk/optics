@@ -50,7 +50,7 @@ async function validateBranch(admin: any, user: any, branchId?: string | null) {
 }
 
 export async function GET(request: Request) {
-  const { user, response } = await requirePermission("customers.read");
+  const { user, response } = await requirePermission("customers.manage");
   if (response) return response;
   const customerId = new URL(request.url).searchParams.get("customerId") ?? "";
   if (!id.safeParse(customerId).success) return Response.json({ error: "حدد عميلًا صحيحًا" }, { status: 400 });
