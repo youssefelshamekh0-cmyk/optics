@@ -4,7 +4,7 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { normalizeEgyptianPhone } from "@/lib/phone";
 import CustomersSection from "@/components/customers-section";
 import SalesSection from "@/components/sales-section";
-import { LensPricesSection, LensSuppliesSection, OrderedLensReceiving, ProductsSection } from "@/components/catalog-sections";
+import { LensPricesSection, OrderedLensReceiving, ProductsSection } from "@/components/catalog-sections";
 import OperationsSection from "@/components/operations-section";
 import FinanceCharts from "@/components/finance-charts";
 import ShiftPanel, { ShiftBadge } from "@/components/shift-panel";
