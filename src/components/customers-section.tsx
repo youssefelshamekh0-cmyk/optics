@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeEgyptianPhone } from "@/lib/phone";
 import { cachedRequestJson } from "@/lib/offline-sync";
 import CustomerCarePanel from "@/components/customer-care-panel";
+import CustomerCsvTools from "@/components/customer-csv-tools";
 
 type Customer = {
   id: string; full_name: string; phone: string | null; email: string | null;
