@@ -405,3 +405,67 @@ button:disabled{cursor:not-allowed}
  .notification-menu{position:fixed;top:132px;right:14px;left:14px;width:auto;max-height:calc(100vh - 160px)}
  .mode-switch{overflow-x:auto;flex-wrap:nowrap}.mode-switch button{flex:0 0 auto;white-space:nowrap}
 }
+
+
+/* Mobile-first regression fixes: keep the full header on one row and contain invoice forms/details. */
+@media (max-width: 640px) {
+  .app-shell { width: 100%; max-width: 100%; min-width: 0; overflow-x: clip; }
+  .app-shell > .topbar {
+    display: flex; flex-flow: row nowrap; align-items: center; justify-content: space-between;
+    gap: 8px; width: 100%; min-width: 0; padding: 9px 0;
+  }
+  .app-shell > .topbar > .brand { flex: 0 1 auto; min-width: 0; gap: 6px; }
+  .app-shell > .topbar > .brand > div { min-width: 0; }
+  .app-shell > .topbar > .brand strong { display:block; font-size: clamp(12px, 3.4vw, 15px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-shell > .topbar > .brand span { white-space: nowrap; }
+  .app-shell > .topbar > .top-actions {
+    flex: 0 0 auto; width: auto; min-width: 0; flex-flow: row nowrap; align-items: center;
+    justify-content: flex-end; gap: 4px;
+  }
+  .app-shell > .topbar > .top-actions > * { flex: 0 0 auto; }
+  .app-shell > .topbar .icon-action { min-width: 32px; width: 32px; min-height: 36px; padding: 4px; }
+  .app-shell > .topbar .notification-button { min-width: 32px; width: 32px; }
+  .app-shell > .topbar .connection { max-width: 82px; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-shell > .topbar .top-actions > .quiet:not(.icon-action) { min-height: 34px; padding: 5px 7px; white-space: nowrap; font-size: 11px; }
+  .app-shell > .topbar .brand-logo.small { width: 32px; height: 32px; flex: 0 0 32px; }
+  .sales-section, .sales-panel, .sale-form, .sale-items, .sale-item-row,
+  .sale-fields, .sale-totals, .prescription-details, .prescription-grid,
+  .sales-list-heading, .sale-detail, .sale-return-area { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  .sale-form, .sale-fields, .sale-totals, .sale-item-row, .inline-customer-form,
+  .payment-form, .sale-detail { overflow-wrap: anywhere; }
+  .sale-fields { grid-template-columns: minmax(0, 1fr) !important; }
+  .sale-fields > *, .sale-item-row > *, .sale-detail > *, .payment-form > * { min-width: 0; max-width: 100%; }
+  .sale-fields input, .sale-fields select, .sale-fields textarea,
+  .sale-item-row input, .sale-item-row select, .payment-form input, .payment-form select,
+  .prescription-grid input, .prescription-grid select, .sale-form textarea {
+    display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  }
+  .prescription-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 7px; width: 100%; overflow: hidden;
+  }
+  .prescription-grid > * { min-width: 0; max-width: 100%; }
+  .prescription-grid input { padding-inline: 5px; font-size: 12px; }
+  .sale-item-row { grid-template-columns: minmax(0, 1fr) 76px !important; gap: 8px; }
+  .sale-item-row > label { min-width: 0; }
+  .sale-item-row select { min-width: 0; }
+  .sale-detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .sale-detail > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .sale-detail p { overflow-wrap: anywhere; }
+  .sales-list-heading { display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; }
+  .sales-list-heading > * { min-width:0; max-width:100%; }
+  .table-wrap { width:100%; min-width:0; max-width:100%; overflow-x:auto; }
+  .sales-table { min-width: 760px; }
+  .return-history-modal { width: calc(100vw - 20px); max-width: calc(100vw - 20px); }
+  .return-modal { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .return-modal .return-item-row { grid-template-columns: minmax(0, 1fr) 76px; }
+  .return-modal input, .return-modal select, .return-modal textarea { min-width:0; max-width:100%; box-sizing:border-box; }
+}
+@media (max-width: 390px) {
+  .app-shell > .topbar { gap: 5px; }
+  .app-shell > .topbar > .brand strong { max-width: 118px; }
+  .app-shell > .topbar > .top-actions { gap: 2px; }
+  .app-shell > .topbar .connection { max-width: 66px; }
+  .app-shell > .topbar .top-actions > .quiet:not(.icon-action) { padding-inline: 5px; font-size: 10px; }
+  .prescription-grid { gap: 4px; }
+}
