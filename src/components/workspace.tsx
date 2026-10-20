@@ -147,7 +147,8 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("sales.create") || user.permissions.includes("sales.read") || user.permissions.includes("returns.manage") || user.permissions.includes("deliveries.complete")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>المبيعات</Tab>}
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>المخزون</Tab><Tab id="lenses" active={activeTab} setActive={setActiveTab}>العدسات</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزينة</Tab><Tab id="reports" active={activeTab} setActive={setActiveTab}>التقارير</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="settings" active={activeTab} setActive={setActiveTab}>الإعدادات</Tab></>}
-      {!isOwner && (user.permissions.includes("expenses.create") || user.permissions.includes("payroll.advance.request")) && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>طلباتي</Tab>}
+      {!isOwner && user.permissions.includes("expenses.create") && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفات</Tab>}
+      {!isOwner && user.permissions.includes("payroll.advance.request") && <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>}
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
     </nav>
     <Notice error={error} message={message}/>
