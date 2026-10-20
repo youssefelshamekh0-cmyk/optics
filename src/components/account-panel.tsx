@@ -37,6 +37,8 @@ export default function AccountPanel({ branches, branchIds }: { branches: {id:st
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+async function sendAdvance(event: FormEvent) { event.preventDefault(); setError(""); setNotice(""); const amount = Number(advance.amount); if (!advance.branchId || !Number.isFinite(amount) || amount <= 0) { setError("اختار الفرع واكتب مبلغ سلفة صحيح"); return; } setBusy(true); try { await call("/api/operations", { method: "POST", body: JSON.stringify({ action: "advanceRequest", branchId: advance.branchId, amount, notes: advance.notes.trim() }) }); setAdvance((current) => ({ ...current, amount: "", notes: "" })); setNotice("تم إرسال طلب السلفة للمالك للمراجعة"); await load(); } catch (e) { setError(e instanceof Error ? e.message : "تعذر إرسال طلب السلفة"); } finally { setBusy(false); } }
+
 async function sendLeave(event: FormEvent) {
     event.preventDefault(); setError(""); setNotice(""); setBusy(true);
     try {
@@ -80,6 +82,7 @@ async function sendLeave(event: FormEvent) {
     </> : <p className="notice error">لا يوجد سجل راتب مرتبط بحسابك بعد؛ اطلب من المالك إضافته.</p>)}
 
     <div className="ops-forms">
+      {!isOwner && <form className="ops-form" onSubmit={sendAdvance}><h3>طلب سلفة</h3><p className="footnote">قدّم طلب سلفة للمالك وتابع حالته من سجل المسحوبات.</p><label>الفرع<select required value={advance.branchId} onChange={(e) => setAdvance({ ...advance, branchId: e.target.value })}><option value="">اختر الفرع</option>{branches.filter((b) => b.status === "ACTIVE" && branchIds.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label><label>مبلغ السلفة (ج.م)<input required type="number" min="1" max="10000000" step="0.01" inputMode="decimal" value={advance.amount} onChange={(e) => setAdvance({ ...advance, amount: e.target.value })} placeholder="اكتب المبلغ" /></label><label>ملاحظات (اختياري)<textarea maxLength={500} value={advance.notes} onChange={(e) => setAdvance({ ...advance, notes: e.target.value })} placeholder="سبب طلب السلفة" /></label><button className="primary" disabled={busy || !advance.branchId || !advance.amount || Number(advance.amount) <= 0}>{busy ? "جارٍ الإرسال…" : "إرسال طلب السلفة"}</button></form>}
       {!isOwner && <form className="ops-form" onSubmit={sendLeave}>
         <h3>طلب إجازة أو استئذان</h3>
         <label>نوع الطلب<select value={leave.type} onChange={(e) => setLeave({ ...leave, type: e.target.value as "leave" | "permission" })}><option value="leave">إجازة</option><option value="permission">استئذان (ساعات)</option></select></label>
