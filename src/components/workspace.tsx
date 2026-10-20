@@ -160,7 +160,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     {isOwner && <section className="stats"><Stat label="الفروع" value={String(branches.length).padStart(2, "0")} detail="مرتبطة بالنظام"/><Stat label="الفروع النشطة" value={String(branches.filter((b) => b.status === "ACTIVE").length).padStart(2, "0")} detail="جاهزة للعمل"/><Stat label="فريق العمل" value={String(staff.length).padStart(2, "0")} detail="حسابات المستخدمين"/></section>}
     <ShiftPanel />
     <FinanceCharts /></>}
-    {activeTab === "account" && <><AccountSection isOwner={isOwner} /><AccountPanel /></>}
+    {activeTab === "account" && <><AccountSection isOwner={isOwner} /><AccountPanel branches={branches} branchIds={user.branchIds} /></>}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} branches={branches} branchIds={user.branchIds} isOwner={isOwner} />}
     {activeTab === "sales" && <section className="panel"><div className="mode-switch" role="tablist" aria-label="أقسام المبيعات">
       {(isOwner || user.permissions.includes("sales.create")) && <button type="button" role="tab" aria-selected={salesView === "pos"} className={salesView === "pos" ? "on" : "off"} onClick={() => setSalesView("pos")}>نقطة البيع</button>}
