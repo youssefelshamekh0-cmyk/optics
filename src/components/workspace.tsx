@@ -221,7 +221,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       <button type="button" role="tab" aria-selected={inventoryView==="purchases"} className={inventoryView==="purchases"?"on":"off"} onClick={()=>setInventoryView("purchases")}>المشتريات والموردون</button>
     </div>{inventoryView==="products"?<ProductsSection branches={branches}/>:inventoryView==="stock"?<OperationsSection module="inventory" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>:<OperationsSection module="purchases" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/>}</section>}
     {(isOwner || user.permissions.includes("purchases.manage")) && activeTab === "debts" && <SupplierLedgerSection isOwner={isOwner} />}
-    {isOwner && activeTab === "finance" && <><CentralCash /><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/></>
+    {isOwner && activeTab === "finance" && <><CentralCash /><OperationsSection module="finance" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/></>}
     {isOwner && activeTab === "reports" && <><ReportsPanel branches={branches} mode="finance" /><ReportsPanel branches={branches} mode="staff" /><FinanceCharts /></>}
     {isOwner && activeTab === "staff" && <><OperationsSection module="staff" branches={branches} branchIds={user.branchIds} isOwner={isOwner}/><StaffHours branches={branches} /></>}
     {isOwner && activeTab === "lenses" && <section className="panel"><div className="mode-switch" role="tablist" aria-label="إدارة العدسات">
