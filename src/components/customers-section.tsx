@@ -4,7 +4,6 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeEgyptianPhone } from "@/lib/phone";
 import { cachedRequestJson } from "@/lib/offline-sync";
 import CustomerCarePanel from "@/components/customer-care-panel";
-import CustomerCsvTools from "@/components/customer-csv-tools";
 
 type Customer = {
   id: string; full_name: string; phone: string | null; email: string | null;
@@ -84,9 +83,10 @@ export default function CustomersSection({ canManage, branches, branchIds, isOwn
   return <section className="panel customers-panel">
     <div className="section-heading"><div><p className="eyebrow">سجل مشترك بين الفروع</p><h2>العملاء</h2></div><span className="count-badge">{customers.length}{customers.length === 100 ? "+" : ""} عميل</span></div>
     <div className="customer-toolbar">
-      <label className="customer-search">بحث<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="اسم العميل أو رقم الموبايل" /></label>
+      <label className="customer-search">ابحث عن عميل<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="اكتب الاسم أو رقم الموبايل أو البريد…" autoComplete="off" /></label>
+      {canManage && <button type="button" className="primary" onClick={() => { setEditingId(null); setDraft(emptyDraft); setPhoneLookup(""); document.getElementById("customer-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>+ إضافة عميل</button>}
+      <span className="footnote">عرض {visibleCustomers.length} من {customers.length} عميل</span>
     </div>
-    <CustomerCsvTools customers={customers} canManage={canManage} onImported={refresh} />
     {error && <div className="notice error" role="alert">{error}</div>}
     {notice && <div className="notice success" role="status">{notice}</div>}
     <>
@@ -104,7 +104,7 @@ export default function CustomersSection({ canManage, branches, branchIds, isOwn
           <button className="primary" disabled={busy}>{busy ? "جارٍ الحفظ…" : editingId ? "حفظ التعديلات" : "إضافة العميل"}</button>
         </div>
       </form>}
-      <p className="footnote">سجل العملاء مشترك بين جميع الفروع، ويظهر أول 100 سجل. تُتاح البيانات لمن لديه صلاحية عرض العملاء.</p>
+      <p className="footnote">سجل العملاء مشترك بين جميع الفروع. استخدم البحث للوصول السريع، واضغط على تعديل لتحديث بيانات العميل. تُتاح البيانات لمن لديه صلاحية عرض العملاء.</p>
       {canManage && <CustomerCarePanel customers={customers} branches={branches} branchIds={branchIds} isOwner={isOwner} canManage={canManage} />}
     </>
   </section>;
