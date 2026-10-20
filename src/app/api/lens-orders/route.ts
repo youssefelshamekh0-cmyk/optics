@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const user=await getCurrentUser();
   if(!user) return Response.json({error:"يلزم تسجيل الدخول"},{status:401});
-  if(!user.roles.includes("super_admin")&&!user.permissions.some(p=>["inventory.manage","purchases.manage"].includes(p))) return Response.json({error:"تغيير حالة الطلبيات متاح للإدارة"},{status:403});
+  if(!user.roles.includes("super_admin")&&!user.permissions.some(p=>["sales.create","inventory.manage","purchases.manage"].includes(p))) return Response.json({error:"تغيير حالة الطلبيات متاح للإدارة"},{status:403});
   if(!(await requireSameOrigin(request))) return Response.json({error:"الطلب غير صالح"},{status:403});
   const parsed=updateSchema.safeParse(await request.json().catch(()=>null));
   if(!parsed.success) return Response.json({error:"بيانات تحديث الطلبية غير صحيحة"},{status:400});
