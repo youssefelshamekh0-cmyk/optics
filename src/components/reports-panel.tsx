@@ -60,5 +60,6 @@ export default function ReportsPanel({branches,mode}:{branches:Branch[];mode:"st
    <h3 className="ops-subtitle">الأصناف الأكثر مبيعًا حسب الكمية</h3><div className="table-wrap"><table><thead><tr><th>الترتيب</th><th>الصنف</th><th>الكمية المباعة</th><th>إجمالي قيمة البيع</th></tr></thead><tbody>{bestSellers.map((p,i)=><tr key={p.name}><td>{i+1}</td><td>{p.name}</td><td>{p.quantity}</td><td>{money(p.revenue)}</td></tr>)}{!bestSellers.length&&<tr><td colSpan={4} className="table-empty">لا توجد مبيعات في الفترة المحددة ضمن آخر الفواتير المحملة.</td></tr>}</tbody></table></div>
   </>}
   <p className="footnote">التقرير يعرض البيانات المتاحة للفترة المحددة. استخدم «طباعة / حفظ PDF» ثم اختر Save as PDF من نافذة الطباعة.</p>
+  <footer className="print-powered-footer"><img src="/icons/icon-192.png" alt="Nazra Systems" width={24} height={24}/><span>Powered by <strong>Nazra Systems</strong></span></footer>
  </section>
 }

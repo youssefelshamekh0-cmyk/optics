@@ -282,3 +282,10 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
 .return-history-modal{width:min(1000px,100%);}
 .return-history-modal .table-wrap{max-width:100%;overflow:auto;}
 @media(max-width:640px){.return-modal-backdrop{padding:8px;align-items:flex-end}.return-modal{padding:14px;border-radius:18px 18px 10px 10px;max-height:92vh}.return-modal-heading{align-items:flex-start}}
+
+/* Nazra Systems signature: app-wide and print-ready */
+.system-powered-footer{display:flex;align-items:center;justify-content:center;gap:9px;margin:28px auto 8px;padding:12px 8px;color:var(--muted);font-size:11px;letter-spacing:.02em;border-top:1px solid var(--line);}
+.system-powered-footer img,.print-powered-footer img{display:block;object-fit:contain;border-radius:7px;}
+.system-powered-footer strong,.print-powered-footer strong{color:var(--green-deep);font-weight:700;}
+.print-powered-footer{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:24px;padding-top:10px;border-top:1px solid #e7ece8;color:#7c8988;font-size:10px;}
+@media print{.print-powered-footer{break-inside:avoid;display:flex!important}.system-powered-footer{display:none!important}}
