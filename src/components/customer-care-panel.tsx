@@ -24,8 +24,8 @@ export default function CustomerCarePanel({ customers, branches, branchIds, isOw
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [exam, setExam] = useState({ examDate: new Date().toISOString().slice(0,10), optometrist: "", rightSphere: "", rightCylinder: "", rightAxis: "", rightAdd: "", leftSphere: "", leftCylinder: "", leftAxis: "", leftAdd: "", pupilDistance: "", notes: "" });
-  const [service, setService] = useState({ serviceType: "warranty", saleId: "", issue: "", warrantyUntil: "", expectedAt: "", notes: "" });
-  const [reminder, setReminder] = useState({ reminderType: "follow_up", dueAt: "", message: "", saleId: "" });
+  const [service, setService] = useState({ serviceType: "warranty", saleInvoiceNumber: "", issue: "", warrantyUntil: "", expectedAt: "", notes: "" });
+  const [reminder, setReminder] = useState({ reminderType: "follow_up", dueAt: "", message: "" });
 
   const refresh = useCallback(async () => {
     if (!customerId) { setData(emptyData); return; }
