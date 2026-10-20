@@ -193,7 +193,7 @@ export async function POST(request: Request) {
               href: "/dashboard", entityType: "branch_product", entityId: stock.product_id,
             });
           } else {
-            await admin.from("app_notifications").delete().eq("event_key", lowStockEvent).eq("entity_id", stock.product_id);
+            await (admin as any).from("app_notifications").delete().eq("event_key", lowStockEvent).eq("entity_id", stock.product_id);
           }
         }
       }
