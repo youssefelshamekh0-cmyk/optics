@@ -32,18 +32,20 @@ export async function GET() {
     });
 
     const olderThanThreeDays = new Date(Date.now() - 3 * 86400000).toISOString();
-    const [pendingSales, pendingLenses, recentPayments] = await Promise.all([
+    const [pendingSales, pendingLenses, recentSales] = await Promise.all([
       admin.from("sales").select("id,invoice_number,created_at,delivery_status").in("delivery_status", ["pending", "processing", "ready"]).lt("created_at", olderThanThreeDays).order("created_at", { ascending: true }).limit(1000),
       admin.from("sale_items").select("id,sale_id,created_at").eq("item_kind", "prescription_lens").eq("supply_status", "pending").lt("created_at", olderThanThreeDays).limit(1000),
-      admin.from("sale_payments").select("sale_id,amount,created_at").order("created_at", { ascending: false }).limit(5000),
+      admin.from("sales").select("id").order("created_at", { ascending: false }).limit(1000),
     ]);
     if (pendingSales.error) throw pendingSales.error;
     if (pendingLenses.error && !/created_at/i.test(pendingLenses.error.message ?? "")) throw pendingLenses.error;
+    if (recentSales.error) throw recentSales.error;
+    const recentSaleIds = [...new Set((recentSales.data ?? []).map((row: any) => row.id).filter(Boolean))];
+    const [recentPayments, recentLedger] = recentSaleIds.length ? await Promise.all([
+      admin.from("sale_payments").select("sale_id,amount,created_at").in("sale_id", recentSaleIds).limit(20000),
+      admin.from("cash_transactions").select("reference_id,amount,created_at").eq("direction", "in").eq("transaction_type", "sale_payment").in("reference_id", recentSaleIds).limit(20000),
+    ]) : [{ data: [], error: null }, { data: [], error: null }];
     if (recentPayments.error) throw recentPayments.error;
-    const recentSaleIds = [...new Set((recentPayments.data ?? []).map((row: any) => row.sale_id).filter(Boolean))];
-    const recentLedger = recentSaleIds.length
-      ? await admin.from("cash_transactions").select("reference_id,amount,created_at").eq("direction", "in").eq("transaction_type", "sale_payment").in("reference_id", recentSaleIds).limit(20000)
-      : { data: [], error: null };
     if (recentLedger.error) throw recentLedger.error;
 
     checks.push({
