@@ -536,3 +536,72 @@ button:disabled{cursor:not-allowed}
   .sale-subheading { flex-wrap: wrap; gap: 6px; align-items: flex-start; }
   .sale-subheading .footnote { max-width: 100%; }
 }
+
+
+/* On phones, invoice details opened with "عرض" become a contained, scrollable dialog. */
+.mobile-invoice-detail-heading { display: none; }
+@media (max-width: 640px) {
+  .sales-table tr:has(.sale-detail) { display: contents; }
+  .sales-table tr:has(.sale-detail) > td {
+    position: fixed;
+    inset: calc(env(safe-area-inset-top, 0px) + 76px) 10px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    z-index: 1100;
+    display: block;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #e2e8e3;
+    border-radius: 16px;
+    box-shadow: 0 18px 50px rgba(16, 31, 29, .28);
+  }
+  .sales-table tr:has(.sale-detail) .sale-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    background: transparent;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+  }
+  .sales-table tr:has(.sale-detail) .sale-detail > div { min-width: 0; max-width: 100%; }
+  .sales-table tr:has(.sale-detail) .sale-detail p { overflow-wrap: anywhere; }
+  .sales-table tr:has(.sale-detail) .payment-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+    box-sizing: border-box;
+  }
+  .sales-table tr:has(.sale-detail) .payment-form label,
+  .sales-table tr:has(.sale-detail) .payment-form input,
+  .sales-table tr:has(.sale-detail) .payment-form select,
+  .sales-table tr:has(.sale-detail) .payment-form button {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .mobile-invoice-detail-heading {
+    display: flex !important;
+    position: sticky;
+    top: -12px;
+    z-index: 2;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    background: #fff;
+    border-bottom: 1px solid #e2e8e3;
+  }
+  .mobile-invoice-detail-heading strong { font-size: 14px; }
+  .mobile-invoice-detail-heading .row-action { flex: 0 0 auto; }
+}
