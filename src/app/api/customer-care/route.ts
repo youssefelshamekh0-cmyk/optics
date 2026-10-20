@@ -24,10 +24,10 @@ const reminderSchema = z.object({
   reminderType: z.enum(["follow_up","annual_exam","ready_order","payment_followup","warranty_followup"]),
   dueAt: z.string().datetime(), message: z.string().trim().min(2).max(1000),
 });
-const updateSchema = z.object({
-  action: z.literal("update_status"), recordId: id, status: z.enum(["received","diagnosing","awaiting_parts","ready","delivered","cancelled"]),
-  kind: z.enum(["service","reminder"]),
-});
+const updateSchema = z.discriminatedUnion("kind", [
+  z.object({ action: z.literal("update_status"), recordId: id, kind: z.literal("service"), status: z.enum(["received","diagnosing","awaiting_parts","ready","delivered","cancelled"]) }),
+  z.object({ action: z.literal("update_status"), recordId: id, kind: z.literal("reminder"), status: z.enum(["completed","cancelled"]) }),
+]);
 
 async function canAccessCustomer(admin: any, user: any, customerId: string) {
   if (user.roles.includes("super_admin")) return true;
@@ -128,7 +128,7 @@ export async function PATCH(request: Request) {
   if (!record) return Response.json({ error: "السجل غير موجود" }, { status: 404 });
   if (!(await canAccessCustomer(admin, user!, record.customer_id))) return Response.json({ error: "ليس لديك وصول لهذا السجل" }, { status: 403 });
   if (!user!.roles.includes("super_admin") && record.branch_id && !user!.branchIds.includes(record.branch_id)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
-  const nextStatus = parsed.data.kind === "reminder" ? (["completed","cancelled"].includes(parsed.data.status) ? parsed.data.status : "pending") : parsed.data.status;
+  const nextStatus = parsed.data.status;
   const values = parsed.data.kind === "service"
     ? { status: nextStatus, updated_at: new Date().toISOString(), completed_at: nextStatus === "delivered" ? new Date().toISOString() : null }
     : { status: nextStatus, completed_at: nextStatus === "completed" ? new Date().toISOString() : null };
