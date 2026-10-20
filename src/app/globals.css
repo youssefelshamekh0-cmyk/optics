@@ -517,3 +517,22 @@ button:disabled{cursor:not-allowed}
   background-color: #f1f5f9;
 }
 .global-search-results .notice { background-color: #fff; }
+
+/* Mobile prescription inputs must stay inside the sale card on narrow screens. */
+@media (max-width: 640px) {
+  .sale-form,
+  .prescription-details,
+  .prescription-grid,
+  .sale-fields,
+  .sale-item-row { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  .prescription-grid {
+    grid-template-columns: minmax(48px, .72fr) repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+  .prescription-grid > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  .prescription-grid input { min-width: 0; width: 100%; padding-inline: 4px; font-size: 11px; }
+  .prescription-grid strong { overflow-wrap: anywhere; font-size: 9px; }
+  .sale-subheading { flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+  .sale-subheading .footnote { max-width: 100%; }
+}
