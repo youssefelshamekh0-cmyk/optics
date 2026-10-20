@@ -151,6 +151,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
       {(isOwner || user.permissions.includes("sales.create") || user.permissions.includes("sales.read") || user.permissions.includes("returns.manage") || user.permissions.includes("deliveries.complete")) && <Tab id="sales" active={activeTab} setActive={setActiveTab}>المبيعات</Tab>}
       {(isOwner || user.permissions.includes("customers.read")) && <Tab id="customers" active={activeTab} setActive={setActiveTab}>العملاء</Tab>}
       {isOwner && <><Tab id="inventory" active={activeTab} setActive={setActiveTab}>المخزون</Tab><Tab id="lenses" active={activeTab} setActive={setActiveTab}>العدسات</Tab><Tab id="finance" active={activeTab} setActive={setActiveTab}>الخزينة</Tab><Tab id="reports" active={activeTab} setActive={setActiveTab}>التقارير</Tab><Tab id="staff" active={activeTab} setActive={setActiveTab}>الموظفون</Tab><Tab id="settings" active={activeTab} setActive={setActiveTab}>الإعدادات</Tab></>}
+      {!isOwner && (user.permissions.includes("sales.create") || user.permissions.includes("inventory.manage") || user.permissions.includes("purchases.manage")) && <Tab id="lens-orders" active={activeTab} setActive={setActiveTab}>طلبيات العدسات</Tab>}
       {!isOwner && user.permissions.includes("expenses.create") && <Tab id="seller-finance" active={activeTab} setActive={setActiveTab}>مصروفات</Tab>}
       <Tab id="account" active={activeTab} setActive={setActiveTab}>حسابي</Tab>
     </nav>
@@ -161,6 +162,7 @@ export default function Workspace({ initialUser }: { initialUser: User | null })
     <ShiftPanel />
     <FinanceCharts /></>}
     {activeTab === "account" && <><AccountSection isOwner={isOwner} /><AccountPanel branches={branches} branchIds={user.branchIds} /></>}
+    {activeTab === "lens-orders" && !isOwner && <LensOrders branches={branches} branchIds={user.branchIds} isOwner={isOwner} />}
     {activeTab === "customers" && (isOwner || user.permissions.includes("customers.read")) && <CustomersSection canManage={isOwner || user.permissions.includes("customers.manage")} branches={branches} branchIds={user.branchIds} isOwner={isOwner} />}
     {activeTab === "sales" && <section className="panel"><div className="mode-switch" role="tablist" aria-label="أقسام المبيعات">
       {(isOwner || user.permissions.includes("sales.create")) && <button type="button" role="tab" aria-selected={salesView === "pos"} className={salesView === "pos" ? "on" : "off"} onClick={() => setSalesView("pos")}>نقطة البيع</button>}
