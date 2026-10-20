@@ -263,7 +263,7 @@ type OrderedLens = { id: string; invoiceNumber: number; orderedAt: string; deliv
 const rxText = (e: OrderedLens["right"]) => (e ? `${e.sphere} / ${e.cylinder}${e.axis ? ` × ${e.axis}` : ""}` : "—");
 
 /** Pick a lens company, see the lenses customers ordered from it, tick the ones that arrived and complete the supplier invoice. */
-function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
+export function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
   const activeBranches = branches.filter((b) => b.status === "ACTIVE");
   const [branchId, setBranchId] = useState("");
   const [companies, setCompanies] = useState<{ name: string; pending: number }[]>([]);
@@ -290,6 +290,18 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
   function toggle(id: string) { setPickedIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id])); }
   function pickCompany(name: string) { setCompany(name); setPickedIds([]); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
   function selectAll() { setPickedIds(orders.map((o) => o.id)); }
+  function printSupplierOrders() {
+    const chosen = orders.filter((order) => pickedIds.length === 0 || pickedIds.includes(order.id));
+    if (!chosen.length) { setError("لا توجد طلبات للطباعة"); return; }
+    const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c));
+    const rows = chosen.map((o) => `<tr><td>${escapeHtml(o.invoiceNumber)}</td><td>${escapeHtml(o.customer)}<br><small>${escapeHtml(o.phone)}</small></td><td>${escapeHtml(o.lensTypeName)}<br><small>${escapeHtml(o.options)}</small></td><td>${escapeHtml(rxText(o.right))}</td><td>${escapeHtml(rxText(o.left))}</td><td></td></tr>`).join("");
+    const page = window.open("", "_blank", "noopener,noreferrer,width=1000,height=750");
+    if (!page) { setError("اسمح بفتح النوافذ المنبثقة للطباعة ثم حاول مرة أخرى"); return; }
+    page.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>طلبات عدسات ${escapeHtml(company)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#172033}h1{font-size:22px}p{color:#555}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #bbb;padding:9px;text-align:right;font-size:12px}th{background:#f0f3f8}small{color:#555}@media print{body{padding:0}button{display:none}}</style></head><body><h1>طلبات العدسات — ${escapeHtml(company)}</h1><p>الفرع: ${escapeHtml(activeBranches.find((b) => b.id === branchId)?.name ?? "")} · عدد الطلبات: ${chosen.length} · تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString("ar-EG"))}</p><table><thead><tr><th>رقم الفاتورة</th><th>العميل / الهاتف</th><th>نوع العدسة / الإضافات</th><th>العين اليمنى</th><th>العين اليسرى</th><th>مراجعة</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);
+    page.document.close();
+    setError("");
+  }
+
   function exportSupplierOrders() {
     const chosen = orders.filter((order) => pickedIds.length === 0 || pickedIds.includes(order.id));
     if (!chosen.length) { setError("لا توجد طلبات لتصديرها"); return; }
@@ -329,7 +341,7 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
     {companies.length === 0 && !error && <p className="footnote">لا توجد عدسات مطلوبة من العملاء بانتظار الاستلام في هذا الفرع.</p>}
     {company && <form className="catalog-form" onSubmit={save}>
       <div className="sale-subheading"><strong>العدسات المطلوبة من {company} ({orders.length})</strong><span className="footnote">علّم العدسات التي وصلت فقط، وسيبقى الباقي مطلوبًا.</span></div>
-      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button><button type="button" className="row-action" onClick={exportSupplierOrders} disabled={orders.length === 0}>تصدير للمورد CSV</button></div>
+      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button><button type="button" className="row-action" onClick={printSupplierOrders} disabled={orders.length === 0}>مراجعة وطباعة</button><button type="button" className="row-action" onClick={exportSupplierOrders} disabled={orders.length === 0}>تصدير للمورد CSV</button></div>
       <div className="order-lens-list">{orders.map((o) => { const on = picked.includes(o.id); return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
         <input type="checkbox" aria-label={`وصلت عدسة فاتورة ${o.invoiceNumber}`} checked={on} onChange={() => toggle(o.id)} />
         <label><strong>{o.lensTypeName}{o.options ? ` — ${o.options}` : ""}</strong><small>فاتورة #{o.invoiceNumber} · {o.customer}{o.phone ? ` · ${o.phone}` : ""} · {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(o.orderedAt))}</small><small>يمين: {rxText(o.right)} · يسار: {rxText(o.left)}</small></label>
