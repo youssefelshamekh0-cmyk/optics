@@ -635,3 +635,59 @@ button:disabled{cursor:not-allowed}
 }
 .connection { gap: 0 !important; }
 .connection > .dot { flex: 0 0 8px; }
+
+
+/* Keep the logout action visible and tappable in the mobile header. */
+@media (max-width: 640px) {
+  .app-shell > .topbar {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 5px;
+    width: 100%;
+    min-width: 0;
+  }
+  .app-shell > .topbar > .brand {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 42%;
+  }
+  .app-shell > .topbar > .top-actions {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    align-items: center;
+    width: auto;
+    min-width: 0;
+    gap: 4px;
+    overflow: visible;
+  }
+  .app-shell > .topbar > .top-actions > :nth-child(4) { display: none !important; }
+  .app-shell > .topbar > .top-actions > button.quiet:not(.icon-action) {
+    display: inline-flex !important;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    visibility: visible !important;
+    position: static;
+    min-width: 40px;
+    min-height: 34px;
+    padding: 5px 7px;
+    white-space: nowrap;
+    font-size: 11px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ink);
+  }
+  .app-shell > .topbar .connection { flex: 0 0 8px; width: 8px; min-width: 8px; max-width: 8px; }
+  .app-shell > .topbar .connection .dot { width: 7px; height: 7px; }
+  .app-shell > .topbar .brand-logo.small { flex: 0 0 30px; width: 30px; height: 30px; }
+}
+@media (max-width: 390px) {
+  .app-shell > .topbar > .brand { max-width: 38%; }
+  .app-shell > .topbar > .top-actions { gap: 3px; }
+  .app-shell > .topbar > .top-actions > button.quiet:not(.icon-action) { min-width: 36px; padding-inline: 5px; font-size: 10px; }
+}
