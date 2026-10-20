@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeEgyptianPhone } from "@/lib/phone";
 import { cachedRequestJson } from "@/lib/offline-sync";
+import CustomerCarePanel from "@/components/customer-care-panel";
+import CustomerCsvTools from "@/components/customer-csv-tools";
 
 type Customer = {
   id: string; full_name: string; phone: string | null; email: string | null;
@@ -15,7 +17,7 @@ async function requestJson(url: string, init?: RequestInit) {
   return cachedRequestJson<any>(url, init);
 }
 
-export default function CustomersSection({ canManage }: { canManage: boolean }) {
+export default function CustomersSection({ canManage, branches, branchIds, isOwner }: { canManage: boolean; branches: { id: string; name: string; code: string; status: "ACTIVE" | "INACTIVE" }[]; branchIds: string[]; isOwner: boolean }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -84,6 +86,7 @@ export default function CustomersSection({ canManage }: { canManage: boolean }) 
     <div className="customer-toolbar">
       <label className="customer-search">بحث<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="اسم العميل أو رقم الموبايل" /></label>
     </div>
+    <CustomerCsvTools customers={customers} canManage={canManage} onImported={refresh} />
     {error && <div className="notice error" role="alert">{error}</div>}
     {notice && <div className="notice success" role="status">{notice}</div>}
     <>
@@ -102,6 +105,7 @@ export default function CustomersSection({ canManage }: { canManage: boolean }) 
         </div>
       </form>}
       <p className="footnote">سجل العملاء مشترك بين جميع الفروع، ويظهر أول 100 سجل. تُتاح البيانات لمن لديه صلاحية عرض العملاء.</p>
+      {canManage && <CustomerCarePanel customers={customers} branches={branches} branchIds={branchIds} isOwner={isOwner} canManage={canManage} />}
     </>
   </section>;
 }
