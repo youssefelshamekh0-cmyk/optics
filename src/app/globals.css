@@ -469,3 +469,28 @@ button:disabled{cursor:not-allowed}
   .app-shell > .topbar .top-actions > .quiet:not(.icon-action) { padding-inline: 5px; font-size: 10px; }
   .prescription-grid { gap: 4px; }
 }
+
+
+/* Seller header polish: share saved brand identity with staff and preserve a compact mobile bar. */
+.topbar .brand { align-items: center; }
+.topbar .brand-logo.small {
+  display: block; flex: 0 0 40px; width: 40px; height: 40px;
+  object-fit: contain; border-radius: 12px; background: var(--surface, #fff);
+  border: 1px solid var(--line, #e3e9e5); padding: 2px; box-sizing: border-box;
+}
+.topbar .brand strong { display: block; line-height: 1.35; }
+.topbar .brand span { display: block; margin-top: 2px; line-height: 1.3; }
+@media (max-width: 640px) {
+  .app-shell > .topbar { gap: 6px; }
+  .app-shell > .topbar > .brand { flex: 0 1 auto; min-width: 0; }
+  .app-shell > .topbar > .brand strong { max-width: 138px; font-size: clamp(11px, 3.3vw, 14px); }
+  .app-shell > .topbar > .brand span { font-size: 9px; }
+  .app-shell > .topbar .brand-logo.small { flex-basis: 32px; width: 32px; height: 32px; border-radius: 10px; }
+  .app-shell > .topbar > .top-actions { gap: 3px; }
+  .app-shell > .topbar > .top-actions > :nth-child(4) { display: none; }
+}
+@media (max-width: 390px) {
+  .app-shell > .topbar > .brand strong { max-width: 108px; font-size: 11px; }
+  .app-shell > .topbar > .brand span { font-size: 8px; }
+  .app-shell > .topbar .connection { max-width: 58px; }
+}
