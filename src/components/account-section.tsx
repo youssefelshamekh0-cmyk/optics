@@ -65,7 +65,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
       const r = await fetch("/api/brand-settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ logoDataUrl: dataUrl }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر حفظ الشعار");
-      setBrandLogo(j.logoDataUrl ?? dataUrl); setLogoNotice("تم حفظ شعار البراند، وسيظهر في الفواتير والتقارير المطبوعة.");
+      setBrandLogo(j.logoDataUrl ?? dataUrl); window.dispatchEvent(new Event("brand-settings:changed")); setLogoNotice("تم حفظ شعار البراند، وسيظهر في الفواتير والتقارير المطبوعة.");
     } catch (e) { setLogoError(e instanceof Error ? e.message : "تعذر حفظ الشعار"); }
     finally { setLogoBusy(false); }
   }
@@ -76,7 +76,7 @@ export default function AccountSection({ isOwner }: { isOwner: boolean }) {
       const r = await fetch("/api/brand-settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ remove: true }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "تعذر حذف الشعار");
-      setBrandLogo(null); setLogoNotice("تم حذف شعار البراند.");
+      setBrandLogo(null); window.dispatchEvent(new Event("brand-settings:changed")); setLogoNotice("تم حذف شعار البراند.");
     } catch (e) { setLogoError(e instanceof Error ? e.message : "تعذر حذف الشعار"); }
     finally { setLogoBusy(false); }
   }

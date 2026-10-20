@@ -299,3 +299,86 @@ input:disabled, select:disabled, textarea:disabled { opacity: .7; background: #f
 .global-search-results section>button:hover{background:var(--surface-soft)}
 .global-search-results small{color:var(--muted);font-size:11px}
 @media(max-width:760px){.global-search{order:5;flex:1 1 100%;max-width:none}.global-search>input{width:100%}.global-search-results{right:auto;left:0}}
+
+
+/* Consolidated workspace navigation */
+.icon-action { min-width: 42px; min-height: 42px; font-size: 1.45rem; line-height: 1; }
+.search-drawer { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; margin: 0 0 12px; border: 1px solid var(--line, #d7e2dc); border-radius: 14px; background: var(--surface, #fff); }
+.search-drawer .global-search { flex: 1; min-width: 0; }
+.search-drawer .global-search input { width: 100%; }
+@media (max-width: 640px) {
+  .search-drawer { padding: 10px; }
+  .icon-action { min-width: 40px; }
+}
+
+
+/* Responsive and accessibility polish, excluding layout selectors tied to specific sale-row markup */
+:root{scroll-padding-top:1rem}
+html{scroll-behavior:smooth}
+body{line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.app-shell{width:100%;min-width:0}
+.topbar{gap:16px;min-width:0}
+.brand{min-width:0}
+.brand>div{min-width:0}
+.brand strong{overflow-wrap:anywhere}
+.top-actions{min-width:0;flex-wrap:wrap;justify-content:flex-end;gap:12px}
+.workspace-tabs{position:sticky;top:0;z-index:20;background:var(--paper);scrollbar-width:thin;overscroll-behavior-x:contain}
+.workspace-tab{min-height:40px;transition:background .15s ease,color .15s ease,border-color .15s ease}
+.workspace-tab:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #83b7a2;outline-offset:2px}
+.panel,.stat,.branch-card{min-width:0}
+.panel{box-shadow:0 2px 10px #20382c05}
+.section-heading{gap:12px;flex-wrap:wrap}
+.section-heading>div{min-width:0}
+.table-wrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+table{font-variant-numeric:tabular-nums}
+th{white-space:nowrap}
+td{overflow-wrap:anywhere}
+input,select,textarea{max-width:100%}
+button{touch-action:manipulation}
+button:disabled{cursor:not-allowed}
+.notice{line-height:1.7;overflow-wrap:anywhere}
+.empty{padding:20px;text-align:center}
+@media(max-width:800px){
+ .app-shell{padding-inline:16px}
+ .topbar{height:auto;min-height:70px;padding:12px 0;align-items:flex-start}
+ .top-actions{gap:9px}
+ .welcome{gap:12px}
+ .welcome-art{flex:none}
+ .admin-grid{grid-template-columns:minmax(0,1fr)}
+ .ops-forms{grid-template-columns:minmax(0,1fr)}
+ .catalog-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .sale-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .account-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+ .app-shell{padding-inline:12px}
+ .topbar{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+ .top-actions{justify-content:space-between;width:100%;gap:8px}
+ .top-actions>*{min-width:0}
+ .workspace-tabs{margin-inline:-12px;padding:9px 12px;scroll-snap-type:x proximity}
+ .workspace-tab{scroll-snap-align:start;min-height:42px;padding:9px 12px}
+ .welcome{padding:20px 16px;min-height:125px}
+ .welcome-art{display:none}
+ .welcome h1{letter-spacing:0;line-height:1.4}
+ .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .stat{padding:12px 9px}
+ .stat strong{font-size:clamp(17px,5vw,22px)}
+ .panel{padding:15px 12px;margin-bottom:12px}
+ .section-heading h2{font-size:16px;line-height:1.5}
+ .form-grid,.sale-fields,.catalog-fields,.customer-fields,.ops-fields{grid-template-columns:minmax(0,1fr)}
+ .form-grid .wide,.customer-notes-input{grid-column:auto}
+ .payment-form{grid-template-columns:minmax(0,1fr)}
+ .payment-form .primary{grid-column:auto}
+ .account-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .account-kpis article{padding:10px}
+ .account-kpis strong{overflow-wrap:anywhere}
+ .daily-list-row{min-width:0}
+ .ops-toolbar{align-items:stretch;flex-direction:column}
+ .ops-toolbar>label,.ops-toolbar select{width:100%;min-width:0}
+ .primary{min-height:42px}
+ .form-grid .primary,.ops-form>.primary,.sale-form>.primary{width:100%}
+}
+@media(prefers-reduced-motion:reduce){
+ html{scroll-behavior:auto}
+ *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}

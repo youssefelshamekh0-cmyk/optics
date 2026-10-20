@@ -278,6 +278,26 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
   function toggle(id: string) { setPickedIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id])); }
   function pickCompany(name: string) { setCompany(name); setPickedIds([]); setNotice(""); setForm((f) => ({ ...f, supplierName: name })); }
   function selectAll() { setPickedIds(orders.map((o) => o.id)); }
+  function exportSupplierOrders() {
+    const chosen = orders.filter((order) => pickedIds.length === 0 || pickedIds.includes(order.id));
+    if (!chosen.length) { setError("لا توجد طلبات لتصديرها"); return; }
+    const cell = (value: unknown) => {
+      let text = String(value ?? "");
+      if (/^[\\s]*[=+@\\-]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const rows = [
+      ["رقم الفاتورة", "العميل", "الموبايل", "الشركة", "نوع العدسة", "الإضافات", "العين اليمنى SPH/CYL/AXIS", "العين اليسرى SPH/CYL/AXIS", "تاريخ الطلب"],
+      ...chosen.map((order) => [order.invoiceNumber, order.customer, order.phone, order.company, order.lensTypeName, order.options, rxText(order.right), rxText(order.left), new Date(order.orderedAt).toLocaleDateString("en-CA")]),
+    ];
+    const csv = "\\uFEFF" + rows.map((row) => row.map(cell).join(",")).join("\\r\\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `طلبات-العدسات-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    setNotice(`تم تصدير ${chosen.length} طلب للمورد دون تغيير حالة الاستلام.`); setError("");
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault(); setError(""); setNotice("");
@@ -297,7 +317,7 @@ function OrderedLensReceiving({ branches }: { branches: Branch[] }) {
     {companies.length === 0 && !error && <p className="footnote">لا توجد عدسات مطلوبة من العملاء بانتظار الاستلام في هذا الفرع.</p>}
     {company && <form className="catalog-form" onSubmit={save}>
       <div className="sale-subheading"><strong>العدسات المطلوبة من {company} ({orders.length})</strong><span className="footnote">علّم العدسات التي وصلت فقط، وسيبقى الباقي مطلوبًا.</span></div>
-      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button></div>
+      <div className="supply-bulk"><button type="button" className="row-action" onClick={selectAll} disabled={orders.length === 0}>تحديد الكل</button><button type="button" className="row-action" onClick={() => setPickedIds([])} disabled={picked.length === 0}>إلغاء التحديد</button><button type="button" className="row-action" onClick={exportSupplierOrders} disabled={orders.length === 0}>تصدير للمورد CSV</button></div>
       <div className="order-lens-list">{orders.map((o) => { const on = picked.includes(o.id); return <div key={o.id} className={`order-lens ${on ? "on" : ""}`}>
         <input type="checkbox" aria-label={`وصلت عدسة فاتورة ${o.invoiceNumber}`} checked={on} onChange={() => toggle(o.id)} />
         <label><strong>{o.lensTypeName}{o.options ? ` — ${o.options}` : ""}</strong><small>فاتورة #{o.invoiceNumber} · {o.customer}{o.phone ? ` · ${o.phone}` : ""} · {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(o.orderedAt))}</small><small>يمين: {rxText(o.right)} · يسار: {rxText(o.left)}</small></label>

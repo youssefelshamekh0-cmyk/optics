@@ -35,7 +35,9 @@ async function lookupLensPrice(admin: ReturnType<typeof getSupabaseAdmin>, branc
 export async function GET(request: Request) {
   const { user, response } = await requirePermission("sales.read");
   if (response) return response;
-  const branchId = new URL(request.url).searchParams.get("branchId");
+  const params = new URL(request.url).searchParams;
+  const branchId = params.get("branchId");
+  const customerId = params.get("customerId");
   if (branchId && !user!.roles.includes("super_admin") && !user!.branchIds.includes(branchId)) return Response.json({ error: "ليس لديك وصول لهذا الفرع" }, { status: 403 });
   if (!branchId && !user!.roles.includes("super_admin") && !user!.branchIds.length) return Response.json({ sales: [] });
   const admin = getSupabaseAdmin();
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
     .order("created_at", { ascending: false }).limit(100);
   if (branchId) query = query.eq("branch_id", branchId);
   else if (!user!.roles.includes("super_admin")) query = query.in("branch_id", user!.branchIds);
+  if (customerId) query = query.eq("customer_id", customerId);
   const { data: rows, error } = await query;
   if (error) throw error;
   if (!rows?.length) return Response.json({ sales: [] });

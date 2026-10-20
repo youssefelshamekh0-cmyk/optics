@@ -34,12 +34,19 @@ export async function GET() {
     const olderThanThreeDays = new Date(Date.now() - 3 * 86400000).toISOString();
     const [pendingSales, pendingLenses, recentSales] = await Promise.all([
       admin.from("sales").select("id,invoice_number,created_at,delivery_status").in("delivery_status", ["pending", "processing", "ready"]).lt("created_at", olderThanThreeDays).order("created_at", { ascending: true }).limit(1000),
-      admin.from("sale_items").select("id,sale_id,created_at").eq("item_kind", "prescription_lens").eq("supply_status", "pending").lt("created_at", olderThanThreeDays).limit(1000),
+      admin.from("sale_items").select("id,sale_id").eq("item_kind", "prescription_lens").eq("supply_status", "pending").limit(1000),
       admin.from("sales").select("id").order("created_at", { ascending: false }).limit(1000),
     ]);
     if (pendingSales.error) throw pendingSales.error;
-    if (pendingLenses.error && !/created_at/i.test(pendingLenses.error.message ?? "")) throw pendingLenses.error;
+    if (pendingLenses.error) throw pendingLenses.error;
     if (recentSales.error) throw recentSales.error;
+    const pendingLensSaleIds = [...new Set((pendingLenses.data ?? []).map((row: any) => row.sale_id).filter(Boolean))];
+    const pendingLensSales = pendingLensSaleIds.length
+      ? await admin.from("sales").select("id,created_at").in("id", pendingLensSaleIds).lt("created_at", olderThanThreeDays).limit(1000)
+      : { data: [], error: null };
+    if (pendingLensSales.error) throw pendingLensSales.error;
+    const oldPendingSaleIds = new Set((pendingLensSales.data ?? []).map((row: any) => row.id));
+    const pendingLensCount = (pendingLenses.data ?? []).filter((row: any) => oldPendingSaleIds.has(row.sale_id)).length;
     const recentSaleIds = [...new Set((recentSales.data ?? []).map((row: any) => row.id).filter(Boolean))];
     const [recentPayments, recentLedger] = recentSaleIds.length ? await Promise.all([
       admin.from("sale_payments").select("sale_id,amount,created_at").in("sale_id", recentSaleIds).limit(20000),
@@ -53,12 +60,10 @@ export async function GET() {
       status: (pendingSales.data ?? []).length ? "warning" : "ok", count: (pendingSales.data ?? []).length,
       detail: (pendingSales.data ?? []).length ? "راجع حالة التجهيز وتواصل مع العملاء؛ قد تكون هناك طلبات متأخرة." : "لا توجد طلبات قديمة ضمن الفحص.",
     });
-    const pendingLensCount = pendingLenses.error ? null : (pendingLenses.data ?? []).length;
     checks.push({
       key: "stale-lenses", label: "طلبات عدسات متأخرة",
-      status: pendingLenses.error ? "warning" : pendingLensCount ? "warning" : "ok",
-      count: pendingLensCount ?? undefined,
-      detail: pendingLenses.error ? "تعذر فحص عمر طلبات العدسات؛ تحقق من بنية الجدول." : pendingLensCount ? "توجد طلبات عدسات معلّقة أقدم من 3 أيام." : "لا توجد طلبات عدسات متأخرة ضمن الفحص.",
+      status: pendingLensCount ? "warning" : "ok", count: pendingLensCount,
+      detail: pendingLensCount ? "توجد طلبات عدسات معلّقة أقدم من 3 أيام." : "لا توجد طلبات عدسات متأخرة ضمن الفحص.",
     });
 
     const paymentTotals = new Map<string, number>();
