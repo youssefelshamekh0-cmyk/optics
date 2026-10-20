@@ -494,3 +494,26 @@ button:disabled{cursor:not-allowed}
   .app-shell > .topbar > .brand span { font-size: 8px; }
   .app-shell > .topbar .connection { max-width: 58px; }
 }
+
+
+/* Make global search suggestions fully opaque and readable above all page content. */
+.global-search { isolation: isolate; }
+.global-search-results {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: #172033;
+  box-shadow: 0 16px 42px rgba(16, 37, 29, .22);
+}
+.global-search-results p,
+.global-search-results section,
+.global-search-results section > button {
+  background-color: #ffffff;
+}
+.global-search-results section > button:hover,
+.global-search-results section > button:focus-visible {
+  background-color: #f1f5f9;
+}
+.global-search-results .notice { background-color: #fff; }
