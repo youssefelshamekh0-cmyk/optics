@@ -726,3 +726,78 @@ button:disabled{cursor:not-allowed}
 }
 
 @media(max-width:520px){.prescription-details{min-width:0;max-width:100%;overflow:hidden}.prescription-grid{width:100%;min-width:0;grid-template-columns:46px repeat(3,minmax(0,1fr));gap:5px;align-items:center}.prescription-grid>*{min-width:0;max-width:100%}.prescription-grid strong{font-size:8px;line-height:1.35;overflow-wrap:anywhere}.prescription-grid input{width:100%;min-width:0;padding:5px 3px;font-size:10px}.prescription-grid label{min-width:0;font-size:9px}.prescription-grid label input{min-width:0}.prescription-grid label:nth-last-child(-n+2){grid-column:span 1}}
+
+
+/* Final mobile invoice layout pass: prevent horizontal overflow in sale entry and keep invoice history usable. */
+@media (max-width: 640px) {
+  .app-shell, .app-shell main, .panel, .sale-form, .sales-list-heading, .table-wrap {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .sale-form {
+    padding: 12px;
+    gap: 12px;
+    overflow: hidden;
+  }
+  .sale-form .section-heading { align-items: flex-start; flex-wrap: wrap; }
+  .sale-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+  }
+  .sale-fields > *, .sale-form > label, .sale-form > button {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .sale-fields input, .sale-fields select, .sale-fields textarea,
+  .sale-item-row input, .sale-item-row select, .sale-item-row textarea,
+  .sale-form textarea, .payment-form input, .payment-form select {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .sale-item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(72px, .55fr);
+    align-items: end;
+    gap: 8px;
+    padding: 10px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .sale-item-row > * { min-width: 0; max-width: 100%; }
+  .sale-item-row .sale-total-preview { grid-column: 1 / -1; }
+  .sale-item-row .remove-sale-item { grid-column: 1 / -1; width: 100%; }
+  .sale-fields.sale-totals { grid-template-columns: minmax(0, 1fr); }
+  .sale-notes-label { display: block; min-width: 0; }
+  .sale-form .primary { min-height: 44px; white-space: normal; }
+  .sales-list-heading { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+  .sales-list-heading > * { min-width: 0; max-width: 100%; }
+  .table-wrap { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .sales-table { min-width: 760px; }
+  .sales-table th, .sales-table td { white-space: normal; }
+  .sales-table td strong, .sales-table td small { overflow-wrap: anywhere; }
+  .sales-table .status-select { max-width: 112px; min-width: 0; }
+  .sales-table .row-action { min-height: 36px; }
+  .return-modal, .return-history-modal {
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  .return-modal .payment-form, .return-history-modal .table-wrap { min-width: 0; max-width: 100%; }
+}
+@media (max-width: 390px) {
+  .sale-form { padding: 9px; }
+  .sale-item-row { grid-template-columns: minmax(0, 1fr) minmax(64px, .5fr); gap: 6px; padding: 8px; }
+  .sale-form label { font-size: 12px; }
+  .sale-form input, .sale-form select, .sale-form textarea { font-size: 16px; }
+}
